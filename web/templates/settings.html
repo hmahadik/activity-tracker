@@ -1004,6 +1004,7 @@
                 if (index > -1) {
                     config.privacy.excluded_apps.splice(index, 1);
                     saveConfig('privacy', 'excluded_apps', config.privacy.excluded_apps);
+                    updateTags('excluded_apps', config.privacy.excluded_apps);
                 }
             }
         }
@@ -1141,8 +1142,12 @@
                 if (el) {
                     el.addEventListener('input', (e) => {
                         updateSliderValue(id, e.target.value);
-                        const section = getSection(id);
-                        saveConfig(section, id, parseInt(e.target.value));
+                        const { section, key } = getConfigInfo(id);
+                        // Use parseFloat for max_gb_storage, parseInt for others
+                        const value = id === 'max_gb_storage'
+                            ? parseFloat(e.target.value)
+                            : parseInt(e.target.value);
+                        saveConfig(section, key, value);
                     });
                 }
             });
@@ -1153,8 +1158,8 @@
                 const el = document.getElementById(id);
                 if (el) {
                     el.addEventListener('change', (e) => {
-                        const section = getSection(id);
-                        saveConfig(section, id, e.target.checked);
+                        const { section, key } = getConfigInfo(id);
+                        saveConfig(section, key, e.target.checked);
                     });
                 }
             });
@@ -1164,8 +1169,8 @@
                 const el = document.getElementById(id);
                 if (el) {
                     el.addEventListener('change', (e) => {
-                        const section = getSection(id);
-                        saveConfig(section, id, e.target.value);
+                        const { section, key } = getConfigInfo(id);
+                        saveConfig(section, key, e.target.value);
                     });
                 }
             });
@@ -1179,6 +1184,7 @@
                         if (!config.privacy.excluded_apps.includes(value)) {
                             config.privacy.excluded_apps.push(value);
                             saveConfig('privacy', 'excluded_apps', config.privacy.excluded_apps);
+                            updateTags('excluded_apps', config.privacy.excluded_apps);
                         }
                         e.target.value = '';
                         e.preventDefault();
@@ -1187,14 +1193,38 @@
             }
         });
 
-        function getSection(key) {
-            if (['interval_seconds', 'format', 'quality', 'capture_active_monitor_only'].includes(key)) return 'capture';
-            if (['timeout_seconds', 'min_session_minutes'].includes(key)) return 'afk';
-            if (['enabled', 'model', 'max_samples_per_session', 'auto_summarize_on_afk', 'ocr_enabled', 'crop_to_window'].includes(key)) return 'summarization';
-            if (['data_dir', 'max_days_retention', 'max_gb_storage'].includes(key)) return 'storage';
-            if (['excluded_apps', 'excluded_titles', 'blur_screenshots'].includes(key)) return 'privacy';
-            if (['host', 'port'].includes(key)) return 'web';
-            return 'capture';
+        // Mapping from element IDs to config {section, key}
+        const configMapping = {
+            // Capture
+            interval_seconds: { section: 'capture', key: 'interval_seconds' },
+            format: { section: 'capture', key: 'format' },
+            quality: { section: 'capture', key: 'quality' },
+            capture_active_monitor_only: { section: 'capture', key: 'capture_active_monitor_only' },
+            // AFK
+            timeout_seconds: { section: 'afk', key: 'timeout_seconds' },
+            min_session_minutes: { section: 'afk', key: 'min_session_minutes' },
+            // Summarization
+            summarization_enabled: { section: 'summarization', key: 'enabled' },
+            model: { section: 'summarization', key: 'model' },
+            max_samples_per_session: { section: 'summarization', key: 'max_samples_per_session' },
+            auto_summarize_on_afk: { section: 'summarization', key: 'auto_summarize_on_afk' },
+            ocr_enabled: { section: 'summarization', key: 'ocr_enabled' },
+            crop_to_window: { section: 'summarization', key: 'crop_to_window' },
+            // Storage
+            data_dir: { section: 'storage', key: 'data_dir' },
+            max_days_retention: { section: 'storage', key: 'max_days_retention' },
+            max_gb_storage: { section: 'storage', key: 'max_gb_storage' },
+            // Privacy
+            excluded_apps: { section: 'privacy', key: 'excluded_apps' },
+            excluded_titles: { section: 'privacy', key: 'excluded_titles' },
+            blur_screenshots: { section: 'privacy', key: 'blur_screenshots' },
+            // Web
+            host: { section: 'web', key: 'host' },
+            port: { section: 'web', key: 'port' },
+        };
+
+        function getConfigInfo(elementId) {
+            return configMapping[elementId] || { section: 'capture', key: elementId };
         }
     </script>
 </body>
