@@ -625,6 +625,59 @@
         .toggle input:checked + .toggle-slider.changed {
             box-shadow: 0 0 0 2px rgba(210, 153, 34, 0.4);
         }
+
+        /* Unsaved Changes Banner */
+        .unsaved-banner {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 16px;
+            background: rgba(210, 153, 34, 0.15);
+            border: 1px solid var(--warning);
+            border-radius: 6px;
+            color: var(--warning);
+            font-size: 0.9rem;
+            font-weight: 500;
+            margin-bottom: 16px;
+        }
+
+        .unsaved-banner.hidden {
+            display: none;
+        }
+
+        /* Actions Divider */
+        .actions-divider {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 16px 0;
+        }
+
+        /* Button with icon */
+        button svg {
+            flex-shrink: 0;
+        }
+
+        #saveActions button,
+        .actions-row button {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* Disabled state for save buttons when no changes */
+        #saveBtn:disabled,
+        #discardBtn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        #saveRestartBtn {
+            display: none;
+        }
+
+        #saveRestartBtn.visible {
+            display: inline-flex;
+        }
     </style>
 </head>
 <body>
@@ -962,7 +1015,7 @@
         </div>
 
         <!-- Actions -->
-        <div class="settings-section" style="margin-top: 20px;">
+        <div class="settings-section" style="margin-top: 20px;" id="actionsSection">
             <h2>
                 <svg class="section-icon" viewBox="0 0 24 24">
                     <circle cx="12" cy="12" r="10"></circle>
@@ -971,14 +1024,62 @@
                 </svg>
                 Actions
             </h2>
+
+            <!-- Unsaved Changes Indicator -->
+            <div id="unsavedIndicator" class="unsaved-banner hidden">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+                <span>You have unsaved changes</span>
+            </div>
+
+            <!-- Save Actions -->
+            <div class="actions-row" id="saveActions">
+                <button onclick="saveChanges()" id="saveBtn">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                        <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                        <polyline points="7 3 7 8 15 8"></polyline>
+                    </svg>
+                    Save
+                </button>
+                <button class="restart-btn" onclick="saveAndRestart()" id="saveRestartBtn">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="23 4 23 10 17 10"></polyline>
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                    </svg>
+                    Save &amp; Restart
+                </button>
+                <button class="secondary" onclick="discardChanges()" id="discardBtn">Discard Changes</button>
+            </div>
+
+            <hr class="actions-divider">
+
+            <!-- Other Actions -->
             <div class="actions-row">
-                <button class="danger" onclick="resetConfig()">Reset to Defaults</button>
-                <button class="secondary" onclick="exportConfig()">Export Configuration</button>
+                <button class="secondary" onclick="exportConfig()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    Export Configuration
+                </button>
+                <button class="danger" onclick="resetConfig()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 6h18"></path>
+                        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                    </svg>
+                    Reset to Defaults
+                </button>
             </div>
         </div>
     </div>
 
-    <!-- Sticky Save Bar -->
+    <!-- Floating Save Reminder (shows when scrolled away from Actions) -->
     <div id="saveBar" class="save-bar hidden">
         <div class="save-bar-content">
             <span class="unsaved-indicator">
@@ -987,18 +1088,11 @@
                     <line x1="12" y1="8" x2="12" y2="12"></line>
                     <line x1="12" y1="16" x2="12.01" y2="16"></line>
                 </svg>
-                You have unsaved changes
+                Unsaved changes
             </span>
             <div class="save-buttons">
-                <button class="secondary" onclick="discardChanges()">Discard</button>
                 <button onclick="saveChanges()">Save</button>
-                <button class="restart-btn" onclick="saveAndRestart()" id="saveRestartBtn" style="display: none;">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="23 4 23 10 17 10"></polyline>
-                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
-                    </svg>
-                    Save &amp; Restart
-                </button>
+                <button class="restart-btn" onclick="saveAndRestart()" id="floatingSaveRestartBtn" style="display: none;">Save &amp; Restart</button>
             </div>
         </div>
     </div>
@@ -1182,26 +1276,72 @@
             markInputChanged(elementId, true);
         }
 
-        // Update save bar visibility
+        // Update save bar and Actions section visibility
         function updateSaveBar() {
             const saveBar = document.getElementById('saveBar');
+            const unsavedIndicator = document.getElementById('unsavedIndicator');
+            const saveBtn = document.getElementById('saveBtn');
+            const discardBtn = document.getElementById('discardBtn');
             const saveRestartBtn = document.getElementById('saveRestartBtn');
+            const floatingSaveRestartBtn = document.getElementById('floatingSaveRestartBtn');
             const hasChanges = Object.keys(pendingChanges).length > 0;
 
             if (hasChanges) {
-                saveBar.classList.remove('hidden');
+                // Show unsaved indicator in Actions section
+                unsavedIndicator.classList.remove('hidden');
                 document.body.classList.add('has-unsaved');
+
+                // Enable save/discard buttons
+                saveBtn.disabled = false;
+                discardBtn.disabled = false;
 
                 // Show Save & Restart button if any pending change requires restart
                 if (requiresRestart) {
-                    saveRestartBtn.style.display = 'flex';
+                    saveRestartBtn.classList.add('visible');
+                    floatingSaveRestartBtn.style.display = 'flex';
                 } else {
-                    saveRestartBtn.style.display = 'none';
+                    saveRestartBtn.classList.remove('visible');
+                    floatingSaveRestartBtn.style.display = 'none';
                 }
+
+                // Floating bar visibility based on scroll position
+                updateFloatingBarVisibility();
             } else {
+                // Hide unsaved indicator
+                unsavedIndicator.classList.add('hidden');
                 saveBar.classList.add('hidden');
                 document.body.classList.remove('has-unsaved');
+
+                // Disable save/discard buttons
+                saveBtn.disabled = true;
+                discardBtn.disabled = true;
+
+                // Hide Save & Restart buttons
+                saveRestartBtn.classList.remove('visible');
+                floatingSaveRestartBtn.style.display = 'none';
+
                 requiresRestart = false;
+            }
+        }
+
+        // Show floating bar only when Actions section is scrolled out of view
+        function updateFloatingBarVisibility() {
+            const actionsSection = document.getElementById('actionsSection');
+            const saveBar = document.getElementById('saveBar');
+            const hasChanges = Object.keys(pendingChanges).length > 0;
+
+            if (!hasChanges) {
+                saveBar.classList.add('hidden');
+                return;
+            }
+
+            const rect = actionsSection.getBoundingClientRect();
+            const isActionsVisible = rect.top < window.innerHeight && rect.bottom > 0;
+
+            if (isActionsVisible) {
+                saveBar.classList.add('hidden');
+            } else {
+                saveBar.classList.remove('hidden');
             }
         }
 
@@ -1387,6 +1527,9 @@
         // Event listeners for all inputs
         document.addEventListener('DOMContentLoaded', () => {
             loadConfig();
+
+            // Listen for scroll to update floating bar visibility
+            window.addEventListener('scroll', updateFloatingBarVisibility);
 
             // Range inputs
             ['interval_seconds', 'quality', 'timeout_seconds', 'min_session_minutes',
