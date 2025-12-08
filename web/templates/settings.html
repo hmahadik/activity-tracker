@@ -556,6 +556,75 @@
             color: var(--warning);
             margin-top: 4px;
         }
+
+        /* Sticky Save Bar */
+        .save-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--surface);
+            border-top: 1px solid var(--border);
+            padding: 12px 20px;
+            z-index: 1000;
+            box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
+            transform: translateY(0);
+            transition: transform 0.3s ease;
+        }
+
+        .save-bar.hidden {
+            transform: translateY(100%);
+        }
+
+        .save-bar-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .unsaved-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--warning);
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        .save-buttons {
+            display: flex;
+            gap: 10px;
+        }
+
+        .restart-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--warning);
+            color: #000;
+        }
+
+        .restart-btn:hover {
+            background: #b88a00;
+        }
+
+        /* Add bottom padding to container when save bar is visible */
+        body.has-unsaved .container {
+            padding-bottom: 80px;
+        }
+
+        /* Input changed indicator */
+        .input-changed {
+            border-color: var(--warning) !important;
+            box-shadow: 0 0 0 2px rgba(210, 153, 34, 0.2) !important;
+        }
+
+        .toggle input:not(:checked) + .toggle-slider.changed,
+        .toggle input:checked + .toggle-slider.changed {
+            box-shadow: 0 0 0 2px rgba(210, 153, 34, 0.4);
+        }
     </style>
 </head>
 <body>
@@ -909,19 +978,59 @@
         </div>
     </div>
 
+    <!-- Sticky Save Bar -->
+    <div id="saveBar" class="save-bar hidden">
+        <div class="save-bar-content">
+            <span class="unsaved-indicator">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+                You have unsaved changes
+            </span>
+            <div class="save-buttons">
+                <button class="secondary" onclick="discardChanges()">Discard</button>
+                <button onclick="saveChanges()">Save</button>
+                <button class="restart-btn" onclick="saveAndRestart()" id="saveRestartBtn" style="display: none;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="23 4 23 10 17 10"></polyline>
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                    </svg>
+                    Save &amp; Restart
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notification -->
     <div id="toast" class="toast"></div>
 
     <script>
-        let config = {};
-        let saveTimeout = null;
+        let config = {};           // Current saved config
+        let originalConfig = {};   // Copy of original for comparison
+        let pendingChanges = {};   // Track unsaved changes: { elementId: { section, key, value } }
+        let requiresRestart = false;
+
+        // Settings that require restart
+        const restartRequiredKeys = new Set([
+            'interval_seconds',
+            'timeout_seconds',
+            'host',
+            'port',
+            'data_dir'
+        ]);
 
         // Load configuration on page load
         async function loadConfig() {
             try {
                 const response = await fetch('/api/config');
                 config = await response.json();
+                originalConfig = JSON.parse(JSON.stringify(config)); // Deep copy
+                pendingChanges = {};
+                requiresRestart = false;
                 updateUI(config);
+                updateSaveBar();
                 loadStatus();
             } catch (error) {
                 showToast('Failed to load configuration', 'error');
@@ -1000,11 +1109,14 @@
 
         function removeTag(containerId, tag) {
             if (containerId === 'excluded_apps') {
-                const index = config.privacy.excluded_apps.indexOf(tag);
+                // Get current working copy of excluded apps
+                let apps = pendingChanges['excluded_apps']?.value
+                    || [...config.privacy.excluded_apps];
+                const index = apps.indexOf(tag);
                 if (index > -1) {
-                    config.privacy.excluded_apps.splice(index, 1);
-                    saveConfig('privacy', 'excluded_apps', config.privacy.excluded_apps);
-                    updateTags('excluded_apps', config.privacy.excluded_apps);
+                    apps.splice(index, 1);
+                    trackChange('excluded_apps', 'privacy', 'excluded_apps', apps);
+                    updateTags('excluded_apps', apps);
                 }
             }
         }
@@ -1057,35 +1169,176 @@
             }
         }
 
-        // Save configuration with debouncing
-        async function saveConfig(section, key, value) {
-            if (saveTimeout) clearTimeout(saveTimeout);
+        // Track a pending change (no auto-save)
+        function trackChange(elementId, section, key, value) {
+            pendingChanges[elementId] = { section, key, value };
 
-            saveTimeout = setTimeout(async () => {
-                try {
+            // Check if this change requires restart
+            if (restartRequiredKeys.has(key)) {
+                requiresRestart = true;
+            }
+
+            updateSaveBar();
+            markInputChanged(elementId, true);
+        }
+
+        // Update save bar visibility
+        function updateSaveBar() {
+            const saveBar = document.getElementById('saveBar');
+            const saveRestartBtn = document.getElementById('saveRestartBtn');
+            const hasChanges = Object.keys(pendingChanges).length > 0;
+
+            if (hasChanges) {
+                saveBar.classList.remove('hidden');
+                document.body.classList.add('has-unsaved');
+
+                // Show Save & Restart button if any pending change requires restart
+                if (requiresRestart) {
+                    saveRestartBtn.style.display = 'flex';
+                } else {
+                    saveRestartBtn.style.display = 'none';
+                }
+            } else {
+                saveBar.classList.add('hidden');
+                document.body.classList.remove('has-unsaved');
+                requiresRestart = false;
+            }
+        }
+
+        // Mark input as changed
+        function markInputChanged(elementId, changed) {
+            const el = document.getElementById(elementId);
+            if (!el) return;
+
+            if (el.type === 'checkbox') {
+                const slider = el.nextElementSibling;
+                if (slider) {
+                    if (changed) slider.classList.add('changed');
+                    else slider.classList.remove('changed');
+                }
+            } else {
+                if (changed) el.classList.add('input-changed');
+                else el.classList.remove('input-changed');
+            }
+        }
+
+        // Save all pending changes
+        async function saveChanges() {
+            if (Object.keys(pendingChanges).length === 0) {
+                showToast('No changes to save', 'warning');
+                return;
+            }
+
+            try {
+                // Save each pending change
+                for (const [elementId, change] of Object.entries(pendingChanges)) {
                     const response = await fetch('/api/config', {
                         method: 'PATCH',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ section, key, value })
+                        body: JSON.stringify(change)
                     });
 
                     const result = await response.json();
-
                     if (result.success) {
                         config = result.config;
-                        showToast('Saved', 'success');
-
-                        if (result.requires_restart) {
-                            showToast('Restart required for this change', 'warning');
-                        }
-                    } else {
-                        showToast('No changes made', 'warning');
+                        markInputChanged(elementId, false);
                     }
-                } catch (error) {
-                    showToast('Failed to save', 'error');
-                    console.error('Error saving config:', error);
                 }
-            }, 500);
+
+                originalConfig = JSON.parse(JSON.stringify(config));
+                pendingChanges = {};
+
+                if (requiresRestart) {
+                    showToast('Saved! Restart required for some changes to take effect.', 'warning');
+                } else {
+                    showToast('Settings saved', 'success');
+                }
+
+                requiresRestart = false;
+                updateSaveBar();
+
+            } catch (error) {
+                showToast('Failed to save settings', 'error');
+                console.error('Error saving config:', error);
+            }
+        }
+
+        // Save and restart
+        async function saveAndRestart() {
+            if (Object.keys(pendingChanges).length === 0) {
+                // No changes, just restart
+                await restartService();
+                return;
+            }
+
+            try {
+                // Save all changes first
+                for (const [elementId, change] of Object.entries(pendingChanges)) {
+                    await fetch('/api/config', {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(change)
+                    });
+                }
+
+                showToast('Settings saved. Restarting service...', 'success');
+                pendingChanges = {};
+                requiresRestart = false;
+                updateSaveBar();
+
+                // Now restart
+                await restartService();
+
+            } catch (error) {
+                showToast('Failed to save and restart', 'error');
+                console.error('Error:', error);
+            }
+        }
+
+        // Restart the service
+        async function restartService() {
+            try {
+                showToast('Restarting service...', 'warning');
+
+                const response = await fetch('/api/restart', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showToast('Service restarting. Page will reload...', 'success');
+
+                    // Wait for service to restart, then reload
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 3000);
+                } else {
+                    showToast('Failed to restart: ' + result.error, 'error');
+                }
+
+            } catch (error) {
+                showToast('Failed to restart service', 'error');
+                console.error('Error restarting:', error);
+            }
+        }
+
+        // Discard pending changes
+        function discardChanges() {
+            // Reset UI to original values
+            updateUI(originalConfig);
+
+            // Clear all changed indicators
+            for (const elementId of Object.keys(pendingChanges)) {
+                markInputChanged(elementId, false);
+            }
+
+            pendingChanges = {};
+            requiresRestart = false;
+            updateSaveBar();
+
+            showToast('Changes discarded', 'success');
         }
 
         // Reset configuration
@@ -1147,7 +1400,7 @@
                         const value = id === 'max_gb_storage'
                             ? parseFloat(e.target.value)
                             : parseInt(e.target.value);
-                        saveConfig(section, key, value);
+                        trackChange(id, section, key, value);
                     });
                 }
             });
@@ -1159,7 +1412,7 @@
                 if (el) {
                     el.addEventListener('change', (e) => {
                         const { section, key } = getConfigInfo(id);
-                        saveConfig(section, key, e.target.checked);
+                        trackChange(id, section, key, e.target.checked);
                     });
                 }
             });
@@ -1170,21 +1423,24 @@
                 if (el) {
                     el.addEventListener('change', (e) => {
                         const { section, key } = getConfigInfo(id);
-                        saveConfig(section, key, e.target.value);
+                        trackChange(id, section, key, e.target.value);
                     });
                 }
             });
 
-            // Tag input
+            // Tag input - track changes for excluded apps
             const tagInput = document.getElementById('excluded_apps_input');
             if (tagInput) {
                 tagInput.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter' && e.target.value.trim()) {
                         const value = e.target.value.trim();
-                        if (!config.privacy.excluded_apps.includes(value)) {
-                            config.privacy.excluded_apps.push(value);
-                            saveConfig('privacy', 'excluded_apps', config.privacy.excluded_apps);
-                            updateTags('excluded_apps', config.privacy.excluded_apps);
+                        // Create a working copy of excluded apps
+                        let apps = pendingChanges['excluded_apps']?.value
+                            || [...config.privacy.excluded_apps];
+                        if (!apps.includes(value)) {
+                            apps.push(value);
+                            trackChange('excluded_apps', 'privacy', 'excluded_apps', apps);
+                            updateTags('excluded_apps', apps);
                         }
                         e.target.value = '';
                         e.preventDefault();

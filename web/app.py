@@ -2,6 +2,7 @@
 
 import os
 import sqlite3
+import subprocess
 import threading
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -979,6 +980,42 @@ def reset_config():
 
     except Exception as e:
         return jsonify({"error": f"Failed to reset config: {str(e)}"}), 500
+
+
+@app.route('/api/restart', methods=['POST'])
+def restart_service():
+    """Restart the activity-tracker service.
+
+    Triggers a systemd user service restart. The response is sent before
+    the restart occurs, so the client should expect a brief disconnection.
+
+    Returns:
+        {
+            "success": true,
+            "message": "Service restart initiated"
+        }
+    """
+    try:
+        # Start restart in background thread so we can send response first
+        def do_restart():
+            import time
+            time.sleep(0.5)  # Give time for response to be sent
+            subprocess.run(
+                ['systemctl', '--user', 'restart', 'activity-tracker'],
+                check=True,
+                capture_output=True
+            )
+
+        thread = threading.Thread(target=do_restart, daemon=True)
+        thread.start()
+
+        return jsonify({
+            "success": True,
+            "message": "Service restart initiated. Page will reload automatically."
+        })
+
+    except Exception as e:
+        return jsonify({"error": f"Failed to restart service: {str(e)}"}), 500
 
 
 @app.route('/api/status', methods=['GET'])
