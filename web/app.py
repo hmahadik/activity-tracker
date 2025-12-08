@@ -12,8 +12,14 @@ from tracker.analytics import ActivityAnalytics
 from tracker.storage import ActivityStorage
 from tracker.sessions import SessionManager
 from tracker.vision import HybridSummarizer
+from tracker.config import get_config_manager, Config
+from tracker.monitors import get_monitors
+from dataclasses import asdict
 
 app = Flask(__name__)
+
+# Initialize configuration
+config_manager = get_config_manager()
 
 DATA_DIR = Path.home() / "activity-tracker-data"
 DB_PATH = DATA_DIR / "activity.db"
@@ -884,6 +890,159 @@ def api_session_summarize_status(session_id):
         "session_id": session_summarization_state["session_id"],
         "error": session_summarization_state["error"],
     })
+
+
+@app.route('/settings')
+def settings_page():
+    """Render settings page."""
+    return render_template('settings.html')
+
+
+@app.route('/api/config', methods=['GET'])
+def get_config():
+    """Return current configuration.
+
+    Returns:
+        JSON object with all configuration sections
+    """
+    return jsonify(config_manager.to_dict())
+
+
+@app.route('/api/config', methods=['PATCH'])
+def update_config():
+    """Update configuration values.
+
+    Request body:
+        {
+            "section": "capture",
+            "key": "interval_seconds",
+            "value": 60
+        }
+
+    Returns:
+        {
+            "success": true/false,
+            "requires_restart": true/false,
+            "config": {...}
+        }
+    """
+    try:
+        data = request.json or {}
+
+        if not all(k in data for k in ['section', 'key', 'value']):
+            return jsonify({"error": "Missing required fields: section, key, value"}), 400
+
+        section = data['section']
+        key = data['key']
+        value = data['value']
+
+        # Update configuration
+        changed = config_manager.update(section, key, value)
+
+        # Determine if daemon restart is required
+        restart_keys = {
+            'capture': ['interval_seconds'],
+            'afk': ['timeout_seconds'],
+            'web': ['host', 'port'],
+            'storage': ['data_dir'],
+        }
+        requires_restart = section in restart_keys and key in restart_keys[section]
+
+        return jsonify({
+            "success": changed,
+            "requires_restart": requires_restart,
+            "config": config_manager.to_dict()
+        })
+
+    except Exception as e:
+        return jsonify({"error": f"Failed to update config: {str(e)}"}), 500
+
+
+@app.route('/api/config/reset', methods=['POST'])
+def reset_config():
+    """Reset configuration to defaults.
+
+    Returns:
+        {
+            "success": true,
+            "config": {...}
+        }
+    """
+    try:
+        config_manager.config = Config()
+        config_manager.save()
+
+        return jsonify({
+            "success": True,
+            "config": config_manager.to_dict()
+        })
+
+    except Exception as e:
+        return jsonify({"error": f"Failed to reset config: {str(e)}"}), 500
+
+
+@app.route('/api/status', methods=['GET'])
+def get_status():
+    """Return daemon status, storage usage, and system information.
+
+    Returns:
+        {
+            "storage_used_gb": 12.5,
+            "screenshot_count": 45231,
+            "ollama_available": true,
+            "monitors": [...]
+        }
+    """
+    try:
+        storage = ActivityStorage()
+
+        # Get storage usage
+        storage_used = 0
+        if SCREENSHOTS_DIR.exists():
+            for file in SCREENSHOTS_DIR.rglob("*.webp"):
+                try:
+                    storage_used += file.stat().st_size
+                except OSError:
+                    pass
+        storage_used_gb = storage_used / (1024 ** 3)
+
+        # Get screenshot count
+        with get_db_connection() as conn:
+            cursor = conn.execute("SELECT COUNT(*) as count FROM screenshots")
+            screenshot_count = cursor.fetchone()['count']
+
+        # Check Ollama availability
+        try:
+            summarizer = HybridSummarizer()
+            ollama_available = summarizer.is_available()
+        except Exception:
+            ollama_available = False
+
+        # Get monitors
+        try:
+            monitors = get_monitors()
+            monitors_data = [asdict(m) for m in monitors]
+        except Exception:
+            monitors_data = []
+
+        # Get current session if available
+        try:
+            session_mgr = SessionManager(storage)
+            current_session_id = session_mgr.get_current_session_id()
+            current_session = storage.get_session(current_session_id) if current_session_id else None
+        except Exception:
+            current_session = None
+
+        return jsonify({
+            "storage_used_gb": round(storage_used_gb, 2),
+            "screenshot_count": screenshot_count,
+            "ollama_available": ollama_available,
+            "monitors": monitors_data,
+            "current_session": current_session
+        })
+
+    except Exception as e:
+        return jsonify({"error": f"Failed to get status: {str(e)}"}), 500
 
 
 if __name__ == '__main__':

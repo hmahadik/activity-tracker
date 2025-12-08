@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - Activity Tracker</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg: #1a1a1a;
+            --surface: #2d2d2d;
+            --surface-hover: #383838;
+            --border: #444;
+            --text: #e0e0e0;
+            --text-dim: #999;
+            --primary: #4a9eff;
+            --primary-hover: #6bb0ff;
+            --success: #4ade80;
+            --warning: #fb923c;
+            --danger: #f87171;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+
+        .header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 2rem;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 1.5rem;
+        }
+
+        .nav-links a {
+            color: var(--text);
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            transition: background 0.2s;
+        }
+
+        .nav-links a:hover {
+            background: var(--surface-hover);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .settings-section {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .settings-section h2 {
+            font-size: 1.25rem;
+            margin-bottom: 1.5rem;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .settings-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .settings-row:last-child {
+            border-bottom: none;
+        }
+
+        .settings-label {
+            flex: 1;
+        }
+
+        .settings-label h3 {
+            font-size: 1rem;
+            font-weight: 500;
+            margin-bottom: 0.25rem;
+        }
+
+        .settings-label p {
+            font-size: 0.875rem;
+            color: var(--text-dim);
+        }
+
+        .settings-control {
+            flex: 0 0 300px;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        input[type="range"] {
+            flex: 1;
+            height: 6px;
+            border-radius: 3px;
+            background: var(--border);
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--primary);
+            cursor: pointer;
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--primary);
+            cursor: pointer;
+            border: none;
+        }
+
+        .slider-value {
+            min-width: 60px;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+
+        select, input[type="text"] {
+            background: var(--bg);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.5rem 1rem;
+            font-size: 0.9rem;
+            width: 100%;
+        }
+
+        select:focus, input[type="text"]:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .toggle {
+            position: relative;
+            display: inline-block;
+            width: 48px;
+            height: 24px;
+        }
+
+        .toggle input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: var(--border);
+            transition: .4s;
+            border-radius: 24px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        .toggle input:checked + .toggle-slider {
+            background-color: var(--primary);
+        }
+
+        .toggle input:checked + .toggle-slider:before {
+            transform: translateX(24px);
+        }
+
+        button {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: var(--primary-hover);
+        }
+
+        button.secondary {
+            background: var(--surface-hover);
+        }
+
+        button.secondary:hover {
+            background: #4a4a4a;
+        }
+
+        button.danger {
+            background: var(--danger);
+        }
+
+        button.danger:hover {
+            background: #dc2626;
+        }
+
+        .status-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+
+        .status-badge.running {
+            background: rgba(74, 222, 128, 0.2);
+            color: var(--success);
+        }
+
+        .status-badge.stopped {
+            background: rgba(248, 113, 113, 0.2);
+            color: var(--danger);
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 0.5rem 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), var(--primary-hover));
+            transition: width 0.3s;
+        }
+
+        .monitor-list {
+            list-style: none;
+        }
+
+        .monitor-item {
+            padding: 0.5rem;
+            background: var(--bg);
+            border-radius: 6px;
+            margin: 0.5rem 0;
+            font-size: 0.9rem;
+        }
+
+        .monitor-item.primary {
+            border-left: 3px solid var(--primary);
+            padding-left: 1rem;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem 1.5rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            display: none;
+            animation: slideIn 0.3s;
+        }
+
+        .toast.show {
+            display: block;
+        }
+
+        .toast.success {
+            border-left: 4px solid var(--success);
+        }
+
+        .toast.error {
+            border-left: 4px solid var(--danger);
+        }
+
+        .toast.warning {
+            border-left: 4px solid var(--warning);
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateY(100px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .tag-input-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.5rem;
+            min-height: 80px;
+        }
+
+        .tag {
+            background: var(--surface-hover);
+            border: 1px solid var(--border);
+            padding: 0.25rem 0.75rem;
+            border-radius: 6px;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+        }
+
+        .tag-remove {
+            cursor: pointer;
+            color: var(--text-dim);
+            font-weight: bold;
+        }
+
+        .tag-remove:hover {
+            color: var(--danger);
+        }
+
+        .tag-input {
+            flex: 1;
+            min-width: 150px;
+            border: none;
+            background: none;
+            color: var(--text);
+            outline: none;
+            font-size: 0.9rem;
+        }
+
+        .actions-row {
+            display: flex;
+            gap: 1rem;
+            padding-top: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>⚙️ Settings</h1>
+        <nav class="nav-links">
+            <a href="/timeline">Timeline</a>
+            <a href="/analytics">Analytics</a>
+            <a href="/settings">Settings</a>
+        </nav>
+    </div>
+
+    <div class="container">
+        <!-- Capture Settings -->
+        <div class="settings-section">
+            <h2>📸 Capture Settings</h2>
+            
+            <div class="settings-row">
+                <div class="settings-label">
+                    <h3>Capture Interval</h3>
+                    <p>Time between screenshots</p>
+                </div>
+                <div class="settings-control">
+                    <input type="range" id="interval_seconds" min="10" max="120" step="10">
+                    <span class="slider-value"><span id="interval_value">30</span>s</span>
+                </div>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label">
+                    <h3>Image Format</h3>
+                    <p>Screenshot file format</p>
+                </div>
+                <div class="settings-control">
+                    <select id="format">
+                        <option value="webp">WebP (recommended)</option>
+                        <option value="png">PNG</option>
+                        <option value="jpg">JPEG</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label">
+                    <h3>Image Quality</h3>
+                    <p>Compression quality (higher = larger files)</p>
+                </div>
+                <div class="settings-control">
+                    <input type="range" id="quality" min="50" max="100" step="5">
+                    <span class="slider-value"><span id="quality_value">80</span>%</span>
+                </div>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label">
+                    <h3>Active Monitor Only</h3>
+                    <p>Only capture the monitor with the focused window</p>
+                </div>
+                <div class="settings-control">
+                    <label class="toggle">
+                        <input type="checkbox" id="capture_active_monitor_only">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- AFK Detection -->
+        <div class="settings-section">
+            <h2>💤 AFK Detection</h2>
+            
+            <div class="settings-row">
+                <div class="settings-label">
+                    <h3>AFK Timeout</h3>
+                    <p>Seconds of inactivity before marking as AFK</p>
+                </div>
+                <div class="settings-control">
+                    <input type="range" id="timeout_seconds" min="60" max="600" step="30">
+                    <span class="slider-value"><span id="timeout_value">180</span>s</span>
+                </div>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label">
+                    <h3>Minimum Session Length</h3>
+                    <p>Minimum session duration to keep</p>
+                </div>
+                <div class="settings-control">
+                    <input type="range" id="min_session_minutes" min="1" max="30" step="1">
+                    <span class="slider-value"><span id="min_session_value">5</span>m</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Summarization -->
+        <div class="settings-section">
+            <h2>🤖 Summarization</h2>
+            
+            <div class="settings-row">
+                <div class="settings-label">
+                    <h3>Enable Auto-Summarization</h3>
+                    <p>Automatically generate activity summaries</p>
+                </div>
+                <div class="settings-control">
+                    <label class="toggle">
+                        <input type="checkbox" id="summarization_enabled">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label">
+                    <h3>Model</h3>
+                    <p>Ollama model for summarization</p>
+                </div>
+                <div class="settings-control">
+                    <select id="model">
+                        <option value="gemma3:27b-it-qat">Gemma 3 27B (best quality, ~18GB VRAM)</option>
+                        <option value="gemma3:14b-it-qat">Gemma 3 14B (good quality, ~8GB VRAM)</option>
+                        <option value="llama3.2-vision:11b">Llama 3.2 Vision 11B (~7GB VRAM)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label">
+                    <h3>Summarize on AFK</h3>
+                    <p>Generate summary when going AFK</p>
+                </div>
+                <div class="settings-control">
+                    <label class="toggle">
+                        <input type="checkbox" id="auto_summarize_on_afk">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label">
+                    <h3>Enable OCR</h3>
+                    <p>Use OCR for text extraction and grounding</p>
+                </div>
+                <div class="settings-control">
+                    <label class="toggle">
+                        <input type="checkbox" id="ocr_enabled">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label">
+                    <h3>Crop to Window</h3>
+                    <p>Use cropped screenshots for better accuracy</p>
+                </div>
+                <div class="settings-control">
+                    <label class="toggle">
+                        <input type="checkbox" id="crop_to_window">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label">
+                    <h3>Max Samples Per Session</h3>
+                    <p>Maximum screenshots to analyze per session</p>
+                </div>
+                <div class="settings-control">
+                    <input type="range" id="max_samples_per_session" min="5" max="20" step="1">
+                    <span class="slider-value"><span id="max_samples_value">10</span></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Storage -->
+        <div class="settings-section">
+            <h2>💾 Storage</h2>
+            
+            <div class="settings-row">
+                <div class="settings-label">
+                    <h3>Data Directory</h3>
+                    <p>Location for screenshots and database</p>
+                </div>
+                <div class="settings-control">
+                    <input type="text" id="data_dir" readonly style="background: var(--surface-hover); cursor: not-allowed;">
+                </div>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label">
+                    <h3>Retention Period</h3>
+                    <p>Delete data older than this (0 = unlimited)</p>
+                </div>
+                <div class="settings-control">
+                    <input type="range" id="max_days_retention" min="0" max="365" step="30">
+                    <span class="slider-value"><span id="retention_value">90</span> days</span>
+                </div>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label">
+                    <h3>Maximum Storage</h3>
+                    <p>Maximum storage space (0 = unlimited)</p>
+                </div>
+                <div class="settings-control">
+                    <input type="range" id="max_gb_storage" min="0" max="200" step="10">
+                    <span class="slider-value"><span id="storage_value">50</span> GB</span>
+                </div>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label">
+                    <h3>Current Usage</h3>
+                    <p><span id="storage_used">0</span> GB / <span id="storage_max">50</span> GB</p>
+                </div>
+                <div class="settings-control">
+                    <div class="progress-bar" style="width: 100%;">
+                        <div class="progress-fill" id="storage_progress" style="width: 0%;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Privacy -->
+        <div class="settings-section">
+            <h2>🔒 Privacy</h2>
+            
+            <div class="settings-row" style="border:none; flex-direction: column; align-items: stretch;">
+                <div class="settings-label">
+                    <h3>Excluded Apps</h3>
+                    <p>App class names to exclude from tracking</p>
+                </div>
+                <div id="excluded_apps_container" class="tag-input-container" style="margin-top: 1rem;">
+                    <input type="text" class="tag-input" id="excluded_apps_input" placeholder="Type app name and press Enter...">
+                </div>
+            </div>
+        </div>
+
+        <!-- System Status -->
+        <div class="settings-section">
+            <h2>📊 System Status</h2>
+            
+            <div class="settings-row">
+                <div class="settings-label">
+                    <h3>Ollama Status</h3>
+                    <p>AI summarization service</p>
+                </div>
+                <div class="settings-control">
+                    <span class="status-badge" id="ollama_status">Checking...</span>
+                </div>
+            </div>
+
+            <div class="settings-row">
+                <div class="settings-label">
+                    <h3>Screenshots</h3>
+                    <p>Total screenshots captured</p>
+                </div>
+                <div class="settings-control">
+                    <span id="screenshot_count">-</span>
+                </div>
+            </div>
+
+            <div class="settings-row" style="border:none; flex-direction: column; align-items: stretch;">
+                <div class="settings-label">
+                    <h3>Monitors</h3>
+                    <p>Detected display outputs</p>
+                </div>
+                <ul class="monitor-list" id="monitor_list" style="margin-top: 1rem;"></ul>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="settings-section">
+            <h2>🎯 Actions</h2>
+            <div class="actions-row">
+                <button class="danger" onclick="resetConfig()">Reset to Defaults</button>
+                <button class="secondary" onclick="exportConfig()">Export Config</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+
+    <script>
+        let config = {};
+        let saveTimeout = null;
+
+        // Load configuration on page load
+        async function loadConfig() {
+            try {
+                const response = await fetch('/api/config');
+                config = await response.json();
+                updateUI(config);
+
+                // Load system status
+                loadStatus();
+            } catch (error) {
+                showToast('Failed to load configuration', 'error');
+                console.error('Error loading config:', error);
+            }
+        }
+
+        // Update UI with config values
+        function updateUI(cfg) {
+            // Capture
+            setValue('interval_seconds', cfg.capture.interval_seconds);
+            setValue('format', cfg.capture.format);
+            setValue('quality', cfg.capture.quality);
+            setChecked('capture_active_monitor_only', cfg.capture.capture_active_monitor_only);
+
+            // AFK
+            setValue('timeout_seconds', cfg.afk.timeout_seconds);
+            setValue('min_session_minutes', cfg.afk.min_session_minutes);
+
+            // Summarization
+            setChecked('summarization_enabled', cfg.summarization.enabled);
+            setValue('model', cfg.summarization.model);
+            setChecked('auto_summarize_on_afk', cfg.summarization.auto_summarize_on_afk);
+            setChecked('ocr_enabled', cfg.summarization.ocr_enabled);
+            setChecked('crop_to_window', cfg.summarization.crop_to_window);
+            setValue('max_samples_per_session', cfg.summarization.max_samples_per_session);
+
+            // Storage
+            setValue('data_dir', cfg.storage.data_dir);
+            setValue('max_days_retention', cfg.storage.max_days_retention);
+            setValue('max_gb_storage', cfg.storage.max_gb_storage);
+            document.getElementById('storage_max').textContent = cfg.storage.max_gb_storage;
+
+            // Privacy
+            updateTags('excluded_apps', cfg.privacy.excluded_apps);
+        }
+
+        function setValue(id, value) {
+            const el = document.getElementById(id);
+            if (!el) return;
+
+            if (el.type === 'range') {
+                el.value = value;
+                updateSliderValue(id, value);
+            } else {
+                el.value = value;
+            }
+        }
+
+        function setChecked(id, checked) {
+            const el = document.getElementById(id);
+            if (el) el.checked = checked;
+        }
+
+        function updateSliderValue(id, value) {
+            const valueEl = document.getElementById(id + '_value');
+            if (valueEl) valueEl.textContent = value;
+        }
+
+        function updateTags(containerId, tags) {
+            const container = document.getElementById(containerId + '_container');
+            if (!container) return;
+
+            // Clear existing tags except input
+            const input = container.querySelector('.tag-input');
+            container.innerHTML = '';
+
+            // Add tags
+            tags.forEach(tag => {
+                const tagEl = document.createElement('span');
+                tagEl.className = 'tag';
+                tagEl.innerHTML = `${tag} <span class="tag-remove" onclick="removeTag('${containerId}', '${tag}')">&times;</span>`;
+                container.appendChild(tagEl);
+            });
+
+            // Re-add input
+            container.appendChild(input);
+        }
+
+        function removeTag(containerId, tag) {
+            if (containerId === 'excluded_apps') {
+                const index = config.privacy.excluded_apps.indexOf(tag);
+                if (index > -1) {
+                    config.privacy.excluded_apps.splice(index, 1);
+                    saveConfig('privacy', 'excluded_apps', config.privacy.excluded_apps);
+                }
+            }
+        }
+
+        // Load system status
+        async function loadStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const status = await response.json();
+
+                // Ollama status
+                const ollamaStatus = document.getElementById('ollama_status');
+                if (status.ollama_available) {
+                    ollamaStatus.textContent = 'Available ✓';
+                    ollamaStatus.className = 'status-badge running';
+                } else {
+                    ollamaStatus.textContent = 'Unavailable ✗';
+                    ollamaStatus.className = 'status-badge stopped';
+                }
+
+                // Screenshot count
+                document.getElementById('screenshot_count').textContent = status.screenshot_count.toLocaleString();
+
+                // Storage usage
+                const used = status.storage_used_gb;
+                const max = config.storage.max_gb_storage || 50;
+                const percent = max > 0 ? (used / max * 100) : 0;
+                document.getElementById('storage_used').textContent = used.toFixed(2);
+                document.getElementById('storage_progress').style.width = Math.min(percent, 100) + '%';
+
+                // Monitors
+                const monitorList = document.getElementById('monitor_list');
+                monitorList.innerHTML = '';
+                status.monitors.forEach(monitor => {
+                    const li = document.createElement('li');
+                    li.className = 'monitor-item' + (monitor.is_primary ? ' primary' : '');
+                    li.textContent = `${monitor.name}: ${monitor.width}x${monitor.height} at (${monitor.x}, ${monitor.y})${monitor.is_primary ? ' (primary)' : ''}`;
+                    monitorList.appendChild(li);
+                });
+
+            } catch (error) {
+                console.error('Error loading status:', error);
+            }
+        }
+
+        // Save configuration with debouncing
+        async function saveConfig(section, key, value) {
+            if (saveTimeout) clearTimeout(saveTimeout);
+
+            saveTimeout = setTimeout(async () => {
+                try {
+                    const response = await fetch('/api/config', {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ section, key, value })
+                    });
+
+                    const result = await response.json();
+
+                    if (result.success) {
+                        config = result.config;
+                        showToast('Saved ✓', 'success');
+
+                        if (result.requires_restart) {
+                            showToast('Restart required for this change to take effect', 'warning');
+                        }
+                    } else {
+                        showToast('No changes made', 'warning');
+                    }
+                } catch (error) {
+                    showToast('Failed to save configuration', 'error');
+                    console.error('Error saving config:', error);
+                }
+            }, 500);
+        }
+
+        // Reset configuration
+        async function resetConfig() {
+            if (!confirm('Reset all settings to defaults? This cannot be undone.')) return;
+
+            try {
+                const response = await fetch('/api/config/reset', { method: 'POST' });
+                const result = await response.json();
+
+                if (result.success) {
+                    config = result.config;
+                    updateUI(config);
+                    showToast('Configuration reset to defaults', 'success');
+                }
+            } catch (error) {
+                showToast('Failed to reset configuration', 'error');
+                console.error('Error resetting config:', error);
+            }
+        }
+
+        // Export configuration
+        function exportConfig() {
+            const yaml = JSON.stringify(config, null, 2);
+            const blob = new Blob([yaml], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'activity-tracker-config.json';
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('Configuration exported', 'success');
+        }
+
+        // Show toast notification
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast ${type} show`;
+
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // Event listeners for all inputs
+        document.addEventListener('DOMContentLoaded', () => {
+            loadConfig();
+
+            // Range inputs
+            ['interval_seconds', 'quality', 'timeout_seconds', 'min_session_minutes', 
+             'max_samples_per_session', 'max_days_retention', 'max_gb_storage'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.addEventListener('input', (e) => {
+                        updateSliderValue(id, e.target.value);
+                        const section = getSection(id);
+                        const key = id;
+                        saveConfig(section, key, parseInt(e.target.value));
+                    });
+                }
+            });
+
+            // Checkboxes
+            ['capture_active_monitor_only', 'summarization_enabled', 'auto_summarize_on_afk', 
+             'ocr_enabled', 'crop_to_window'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.addEventListener('change', (e) => {
+                        const section = getSection(id);
+                        const key = id;
+                        saveConfig(section, key, e.target.checked);
+                    });
+                }
+            });
+
+            // Select inputs
+            ['format', 'model'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.addEventListener('change', (e) => {
+                        const section = getSection(id);
+                        saveConfig(section, id, e.target.value);
+                    });
+                }
+            });
+
+            // Tag input
+            const tagInput = document.getElementById('excluded_apps_input');
+            if (tagInput) {
+                tagInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && e.target.value.trim()) {
+                        const value = e.target.value.trim();
+                        if (!config.privacy.excluded_apps.includes(value)) {
+                            config.privacy.excluded_apps.push(value);
+                            saveConfig('privacy', 'excluded_apps', config.privacy.excluded_apps);
+                        }
+                        e.target.value = '';
+                        e.preventDefault();
+                    }
+                });
+            }
+        });
+
+        function getSection(key) {
+            if (['interval_seconds', 'format', 'quality', 'capture_active_monitor_only'].includes(key)) return 'capture';
+            if (['timeout_seconds', 'min_session_minutes'].includes(key)) return 'afk';
+            if (['enabled', 'model', 'max_samples_per_session', 'auto_summarize_on_afk', 'ocr_enabled', 'crop_to_window'].includes(key)) return 'summarization';
+            if (['data_dir', 'max_days_retention', 'max_gb_storage'].includes(key)) return 'storage';
+            if (['excluded_apps', 'excluded_titles', 'blur_screenshots'].includes(key)) return 'privacy';
+            if (['host', 'port'].includes(key)) return 'web';
+            return 'capture';
+        }
+    </script>
+</body>
+</html>
