@@ -40,9 +40,13 @@ activity-tracker/
 │   ├── __init__.py
 │   ├── capture.py      # Screenshot capture logic
 │   ├── storage.py      # SQLite + filesystem management
-│   └── daemon.py       # Background service daemon
+│   ├── daemon.py       # Background service daemon
+│   ├── analytics.py    # Activity analytics and statistics
+│   ├── vision.py       # AI summarization (OCR + LLM)
+│   ├── afk.py          # AFK detection via pynput
+│   └── sessions.py     # Session management
 ├── web/
-│   ├── app.py          # Flask application
+│   ├── app.py          # Flask application with REST API
 │   └── templates/
 ├── tests/              # Pytest test suite
 │   ├── conftest.py     # Test fixtures
@@ -50,8 +54,8 @@ activity-tracker/
 │   ├── test_storage.py # Storage CRUD tests
 │   └── test_dhash.py   # Hash comparison tests
 ├── scripts/
-│   └── install.sh      # Systemd service setup
-├── config.yaml.example
+│   ├── install.sh      # Systemd service setup
+│   └── summarize_activity.py  # CLI for generating summaries
 ├── requirements.txt
 ├── README.md           # Project documentation
 └── CLAUDE.md
@@ -62,12 +66,25 @@ activity-tracker/
 - **2025-11-27**: Added full docstrings to all modules following PEP 257
 - **2025-11-27**: Created README.md with installation and usage instructions
 - **2025-11-27**: Identified 13 edge cases requiring attention (see TODO comments)
+
 ### 2024-12-02 - Phase 1: Timeline + Analytics
 - Building rich timeline UI with calendar heatmap + hourly drill-down
 - Full analytics dashboard with charts (using Chart.js)
 - New routes: /timeline, /analytics, /api/activity-data
 - Keeping existing day view, timeline is additive
 - Stack: Flask + Jinja2 + Chart.js + vanilla JS (no React)
+
+### 2025-12-08 - Phase 2: Session-Based Tracking
+- Implemented AFK detection using pynput (keyboard/mouse monitoring)
+- Session management: automatic session start/end on AFK transitions
+- Screenshots linked to sessions via junction table
+- Session summaries with context continuity (previous session context)
+- OCR caching per unique window title within sessions
+- Smart session resume on daemon restart (checks if within AFK timeout)
+- API request details stored for debugging (prompt_text column)
+- Info icons added throughout UI with tooltips
+- Live counts for ongoing sessions (calculated from session_screenshots)
+- Generate button shows loading feedback immediately
 
 ## Known Issues (TODO Comments Added)
 - **Multi-monitor support**: Currently hardcoded to primary monitor

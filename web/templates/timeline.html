@@ -681,6 +681,420 @@
             color: var(--text);
         }
 
+        /* Summary styles */
+        .summary-box {
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 12px 15px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .summary-icon {
+            flex-shrink: 0;
+            font-size: 1rem;
+        }
+
+        .summary-text {
+            font-size: 0.9rem;
+            color: var(--text);
+            line-height: 1.5;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .summary-placeholder {
+            color: var(--muted);
+            font-style: italic;
+        }
+
+        .generate-btn {
+            background: var(--accent);
+            color: var(--text-inverse);
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .generate-btn:hover {
+            background: var(--accent-strong);
+        }
+
+        .generate-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .generate-btn .spinner-small {
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        /* Daily summary section */
+        .daily-summary {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+
+        .daily-summary-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .daily-summary-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .daily-summary-content {
+            font-size: 0.9rem;
+            color: var(--text);
+            line-height: 1.6;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        .summary-coverage {
+            font-size: 0.8rem;
+            color: var(--muted);
+        }
+
+        /* Summary badge on hour blocks */
+        .hour-header .summary-badge {
+            font-size: 0.8rem;
+            margin-left: 8px;
+        }
+
+        .hour-title-wrapper {
+            display: flex;
+            align-items: center;
+        }
+
+        /* Session-based styles */
+        .session-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .session-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+            transition: all 0.2s;
+        }
+
+        .session-card:hover {
+            border-color: var(--accent);
+            box-shadow: 0 2px 8px var(--shadow-accent);
+        }
+
+        .session-header {
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.2s;
+        }
+
+        .session-header:hover {
+            background: var(--surface-2);
+        }
+
+        .session-time {
+            font-weight: 600;
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .session-duration {
+            font-size: 0.85rem;
+            color: var(--muted);
+            background: var(--surface-2);
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+
+        .session-meta {
+            display: flex;
+            gap: 15px;
+            font-size: 0.85rem;
+            color: var(--muted);
+        }
+
+        .session-summary-preview {
+            padding: 0 20px 15px 20px;
+            font-size: 0.9rem;
+            color: var(--text);
+            line-height: 1.5;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .session-summary-preview.no-summary {
+            color: var(--muted);
+            font-style: italic;
+        }
+
+        .summary-details-toggle {
+            font-size: 0.75rem;
+            color: var(--muted);
+            cursor: pointer;
+            margin-left: 8px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            transition: all 0.2s;
+        }
+
+        .summary-details-toggle:hover {
+            color: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .summary-details {
+            display: none;
+            margin-top: 10px;
+            padding: 10px 12px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 0.8rem;
+        }
+
+        .summary-details.visible {
+            display: block;
+        }
+
+        .summary-details-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+        }
+
+        .summary-detail-item {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .summary-detail-label {
+            font-size: 0.7rem;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .summary-detail-value {
+            color: var(--text);
+            font-weight: 500;
+        }
+
+        .summary-detail-value.model {
+            font-family: monospace;
+            font-size: 0.75rem;
+        }
+
+        .summary-prompt {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid var(--border);
+        }
+
+        .summary-prompt-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .summary-prompt-label {
+            font-size: 0.7rem;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .summary-prompt-toggle {
+            font-size: 0.7rem;
+            color: var(--accent);
+            cursor: pointer;
+        }
+
+        .summary-prompt-content {
+            display: none;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 0.7rem;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 300px;
+            overflow-y: auto;
+            color: var(--text);
+        }
+
+        .summary-prompt-content.visible {
+            display: block;
+        }
+
+        /* Info icon styles */
+        .info-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            font-size: 0.65rem;
+            color: var(--muted);
+            cursor: help;
+            margin-left: 4px;
+            position: relative;
+        }
+
+        .info-icon:hover {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: var(--text-inverse);
+        }
+
+        .info-tooltip {
+            display: none;
+            position: absolute;
+            bottom: calc(100% + 8px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 10px 12px;
+            font-size: 0.75rem;
+            font-weight: normal;
+            color: var(--text);
+            width: 250px;
+            z-index: 1000;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            text-align: left;
+            line-height: 1.4;
+        }
+
+        .info-tooltip::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 6px solid transparent;
+            border-top-color: var(--border);
+        }
+
+        .info-icon:hover .info-tooltip {
+            display: block;
+        }
+
+        /* Generate button loading state */
+        .generate-btn.loading {
+            pointer-events: none;
+            opacity: 0.8;
+        }
+
+        .session-screenshots {
+            padding: 15px;
+            display: none;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 10px;
+        }
+
+        .session-card.expanded .session-screenshots {
+            display: grid;
+        }
+
+        .session-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.75rem;
+            padding: 2px 8px;
+            border-radius: 10px;
+        }
+
+        .session-status.summarized {
+            background: var(--intensity-2);
+            color: var(--text-inverse);
+        }
+
+        .session-status.pending {
+            background: var(--surface-2);
+            color: var(--muted);
+            border: 1px solid var(--border);
+        }
+
+        .session-status.active {
+            background: var(--accent);
+            color: var(--text-inverse);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        .sessions-summary {
+            padding: 15px;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .sessions-stats {
+            font-size: 0.9rem;
+            color: var(--text);
+        }
+
+        .sessions-stats strong {
+            color: var(--accent);
+        }
+
         /* Responsive */
         @media (max-width: 1024px) {
             .timeline-layout {
@@ -845,6 +1259,9 @@
                     <div class="legend-item" style="background: var(--intensity-3);"></div>
                     <div class="legend-item" style="background: var(--intensity-4);"></div>
                     <span>More</span>
+                    <span class="info-icon">?
+                        <span class="info-tooltip">Activity intensity is based on the number of screenshots captured. Darker colors indicate more activity. Screenshots are taken every 30 seconds when you're active.</span>
+                    </span>
                 </div>
 
                 <div id="leftChartSection" style="display: none; margin-top: 20px;">
@@ -957,11 +1374,17 @@
             selectedDate: null,
             selectedHour: null,
             calendarData: null,
-            chart: null
+            chart: null,
+            summaries: {},  // hour -> summary text
+            generatingStatus: null,
+            pollInterval: null
         };
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
+            // Initialize modal handlers (with empty screenshots array initially)
+            initializeModal([]);
+
             // Load calendar and auto-select today on page load
             const today = new Date();
             const todayStr = today.toISOString().split('T')[0];
@@ -1199,14 +1622,17 @@
             detailContent.innerHTML = '<div class="loading"><div class="spinner"></div><div>Loading...</div></div>';
 
             try {
-                // Fetch both summary and hourly data
-                const [summaryRes, hourlyRes] = await Promise.all([
+                // Fetch summary, hourly data, AI summaries, and sessions
+                const [summaryRes, hourlyRes, aiSummaryRes, sessionsData] = await Promise.all([
                     fetch(`/api/day/${dateStr}/summary`),
-                    fetch(`/api/day/${dateStr}/hourly`)
+                    fetch(`/api/day/${dateStr}/hourly`),
+                    fetch(`/api/summaries/${dateStr}`),
+                    loadSessions(dateStr)
                 ]);
 
                 const summaryData = await summaryRes.json();
                 const hourlyData = await hourlyRes.json();
+                const aiSummaryData = await aiSummaryRes.json();
 
                 if (summaryData.error || hourlyData.error) {
                     throw new Error(summaryData.error || hourlyData.error);
@@ -1214,6 +1640,16 @@
 
                 const summary = summaryData.summary;
                 const hourly = hourlyData.hourly;
+
+                // Store AI summaries in state
+                state.summaries = {};
+                if (aiSummaryData.summaries) {
+                    aiSummaryData.summaries.forEach(s => {
+                        if (s.summary) {
+                            state.summaries[s.hour] = s.summary;
+                        }
+                    });
+                }
 
                 // Update stats
                 updateStats(summary);
@@ -1229,8 +1665,16 @@
                     return;
                 }
 
-                // Render hourly chart
-                renderHourlyChart(hourly);
+                // Try to render sessions first, fall back to hourly if no sessions
+                if (sessionsData && sessionsData.sessions && sessionsData.sessions.length > 0) {
+                    // Render session-based view
+                    renderSessions(sessionsData);
+                    // Also render the hourly chart in the left panel
+                    renderHourlyChartOnly(hourly);
+                } else {
+                    // Fall back to hourly view
+                    renderHourlyChart(hourly, aiSummaryData);
+                }
 
             } catch (error) {
                 console.error('Failed to load day data:', error);
@@ -1241,6 +1685,62 @@
                     </div>
                 `;
             }
+        }
+
+        // Render only the hourly chart (for session view)
+        function renderHourlyChartOnly(hourlyData) {
+            const leftChartSection = document.getElementById('leftChartSection');
+            leftChartSection.style.display = 'block';
+
+            const ctx = document.getElementById('hourlyChart').getContext('2d');
+
+            if (state.chart) {
+                state.chart.destroy();
+            }
+
+            const labels = hourlyData.map(h => `${h.hour}:00`);
+            const data = hourlyData.map(h => h.screenshot_count);
+            const theme = getThemeColors();
+
+            state.chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Screenshots',
+                        data: data,
+                        backgroundColor: theme.accent,
+                        borderColor: theme.accentStrong,
+                        borderWidth: 1,
+                        hoverBackgroundColor: theme.accentSoft,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: { stepSize: 1, color: theme.muted },
+                            grid: { color: theme.border }
+                        },
+                        x: {
+                            ticks: { color: theme.muted },
+                            grid: { color: theme.border }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: theme.surface,
+                            borderColor: theme.border,
+                            borderWidth: 1,
+                            titleColor: theme.text,
+                            bodyColor: theme.text
+                        }
+                    }
+                }
+            });
         }
 
         // Update stats display
@@ -1275,15 +1775,37 @@
         }
 
         // Render hourly chart and all screenshots
-        async function renderHourlyChart(hourlyData) {
+        async function renderHourlyChart(hourlyData, aiSummaryData) {
             const detailContent = document.getElementById('detailContent');
             const leftChartSection = document.getElementById('leftChartSection');
 
             // Show left chart section
             leftChartSection.style.display = 'block';
 
-            // Set up screenshot grid in right panel
+            // Calculate summary coverage
+            const hoursWithScreenshots = aiSummaryData?.summaries?.length || 0;
+            const hoursSummarized = Object.keys(state.summaries).length;
+            const dailySummaryText = buildDailySummary();
+
+            // Set up daily summary and screenshot grid in right panel
             detailContent.innerHTML = `
+                <div class="daily-summary" id="dailySummary">
+                    <div class="daily-summary-header">
+                        <div class="daily-summary-title">
+                            <span>✨</span>
+                            <span>Daily Summary</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span class="summary-coverage" id="summaryCoverage">${hoursSummarized} of ${hoursWithScreenshots} hours summarized</span>
+                            <button class="generate-btn" id="generateAllBtn" onclick="generateSummaries()" ${hoursSummarized === hoursWithScreenshots ? 'style="display:none"' : ''}>
+                                Generate All
+                            </button>
+                        </div>
+                    </div>
+                    <div class="daily-summary-content" id="dailySummaryContent">
+                        ${dailySummaryText || '<span class="summary-placeholder">No summaries generated yet. Click "Generate All" to create AI summaries for each hour.</span>'}
+                    </div>
+                </div>
                 <div class="hour-groups" id="hourGroups">
                     <div class="loading"><div class="spinner"></div><div>Loading screenshots...</div></div>
                 </div>
@@ -1423,6 +1945,7 @@
                     const screenshots = hourlyGroups[hour];
                     const hourStr = `${hour}:00`;
                     const hourEnd = `${(parseInt(hour) + 1)}:00`;
+                    const hourSummary = state.summaries[hour];
 
                     const groupDiv = document.createElement('div');
                     groupDiv.className = 'hour-group';
@@ -1431,13 +1954,33 @@
                     const headerDiv = document.createElement('div');
                     headerDiv.className = 'hour-header';
                     headerDiv.innerHTML = `
-                        <span class="hour-title">${hourStr} - ${hourEnd}</span>
+                        <div class="hour-title-wrapper">
+                            <span class="hour-title">${hourStr} - ${hourEnd}</span>
+                            ${hourSummary ? '<span class="summary-badge">✨</span>' : ''}
+                        </div>
                         <span class="hour-count">${screenshots.length} screenshot${screenshots.length !== 1 ? 's' : ''}</span>
                         <span class="hour-toggle">▼</span>
                     `;
                     headerDiv.onclick = () => {
                         groupDiv.classList.toggle('collapsed');
                     };
+
+                    // Summary section
+                    const summaryDiv = document.createElement('div');
+                    summaryDiv.className = 'summary-box';
+                    summaryDiv.style.margin = '15px 15px 0 15px';
+                    if (hourSummary) {
+                        summaryDiv.innerHTML = `
+                            <span class="summary-icon">✨</span>
+                            <span class="summary-text">${hourSummary}</span>
+                        `;
+                    } else {
+                        summaryDiv.innerHTML = `
+                            <span class="summary-icon" style="opacity: 0.5;">💬</span>
+                            <span class="summary-text summary-placeholder">No summary</span>
+                            <button class="generate-btn" onclick="event.stopPropagation(); generateSummaries([${hour}])">Generate</button>
+                        `;
+                    }
 
                     const contentDiv = document.createElement('div');
                     contentDiv.className = 'hour-content';
@@ -1467,6 +2010,7 @@
                     });
 
                     groupDiv.appendChild(headerDiv);
+                    groupDiv.appendChild(summaryDiv);
                     groupDiv.appendChild(contentDiv);
                     hourGroupsContainer.appendChild(groupDiv);
                 });
@@ -1480,8 +2024,23 @@
             }
         }
 
+        // Global modal state
+        const modalState = {
+            currentIndex: -1,
+            screenshots: [],
+            initialized: false
+        };
+
         // Initialize modal with keyboard navigation
         function initializeModal(screenshots) {
+            modalState.screenshots = screenshots || [];
+
+            // Only set up event handlers once
+            if (modalState.initialized) {
+                return;
+            }
+            modalState.initialized = true;
+
             const modal = document.getElementById('imageModal');
             const modalImg = document.getElementById('modalImage');
             const closeBtn = document.querySelector('.modal-close');
@@ -1493,21 +2052,18 @@
             const modalWindowTitle = document.getElementById('modalWindowTitle');
             const modalWindowTitleContainer = document.getElementById('modalWindowTitleContainer');
 
-            let currentIndex = -1;
-            const allScreenshots = screenshots;
-
             function updateModalContent(index) {
-                if (index < 0 || index >= allScreenshots.length) return;
+                if (index < 0 || index >= modalState.screenshots.length) return;
 
-                currentIndex = index;
-                const screenshot = allScreenshots[index];
+                modalState.currentIndex = index;
+                const screenshot = modalState.screenshots[index];
 
                 // Update image
                 modalImg.src = `/screenshot/${screenshot.id}`;
 
                 // Update metadata
                 const time = new Date(screenshot.timestamp * 1000);
-                modalCounter.textContent = `${index + 1} / ${allScreenshots.length}`;
+                modalCounter.textContent = `${index + 1} / ${modalState.screenshots.length}`;
                 modalTime.textContent = time.toLocaleTimeString();
                 modalApp.textContent = screenshot.app_name || 'Unknown';
 
@@ -1521,11 +2077,11 @@
 
                 // Update navigation buttons
                 prevBtn.classList.toggle('disabled', index === 0);
-                nextBtn.classList.toggle('disabled', index === allScreenshots.length - 1);
+                nextBtn.classList.toggle('disabled', index === modalState.screenshots.length - 1);
             }
 
             function showModal(screenshotId) {
-                const index = allScreenshots.findIndex(s => s.id === screenshotId);
+                const index = modalState.screenshots.findIndex(s => s.id === screenshotId);
                 if (index !== -1) {
                     updateModalContent(index);
                     modal.classList.add('active');
@@ -1534,25 +2090,53 @@
 
             function closeModal() {
                 modal.classList.remove('active');
-                currentIndex = -1;
+                modalState.currentIndex = -1;
             }
 
             function navigatePrev() {
-                if (currentIndex > 0) {
-                    updateModalContent(currentIndex - 1);
+                if (modalState.currentIndex > 0) {
+                    updateModalContent(modalState.currentIndex - 1);
                 }
             }
 
             function navigateNext() {
-                if (currentIndex < allScreenshots.length - 1) {
-                    updateModalContent(currentIndex + 1);
+                if (modalState.currentIndex < modalState.screenshots.length - 1) {
+                    updateModalContent(modalState.currentIndex + 1);
                 }
             }
 
-            // Click handlers
+            // Show modal with a custom screenshots array (for session screenshots)
+            function showModalWithScreenshots(screenshotId, screenshots) {
+                // Replace screenshots array for navigation
+                modalState.screenshots = screenshots;
+
+                const index = screenshots.findIndex(s => s.id === screenshotId);
+                if (index !== -1) {
+                    updateModalContent(index);
+                    modal.classList.add('active');
+                }
+            }
+
+            // Make showModalWithScreenshots available globally for session clicks
+            window.showModalWithScreenshots = showModalWithScreenshots;
+
+            // Click handlers - handle both hourly and session screenshots
             document.addEventListener('click', (e) => {
                 if (e.target.classList.contains('screenshot-img')) {
                     const screenshotId = parseInt(e.target.dataset.id);
+
+                    // Check if this is a session screenshot
+                    if (e.target.classList.contains('session-screenshot')) {
+                        const sessionId = e.target.dataset.sessionId;
+                        const container = document.getElementById(`session-screenshots-${sessionId}`);
+                        if (container && container.dataset.screenshots) {
+                            const sessionScreenshots = JSON.parse(container.dataset.screenshots);
+                            showModalWithScreenshots(screenshotId, sessionScreenshots);
+                            return;
+                        }
+                    }
+
+                    // Default to hourly screenshots
                     showModal(screenshotId);
                 }
             });
@@ -1606,6 +2190,479 @@
             document.removeEventListener('keydown', window.modalKeyHandler);
             window.modalKeyHandler = modalKeyHandler;
             document.addEventListener('keydown', modalKeyHandler);
+        }
+
+        // Build daily summary from hourly summaries
+        function buildDailySummary() {
+            const hours = Object.keys(state.summaries).sort((a, b) => a - b);
+            if (hours.length === 0) return '';
+
+            return hours.map(hour => {
+                const hourStr = `${hour}:00`;
+                return `<strong>${hourStr}</strong>: ${state.summaries[hour]}`;
+            }).join('<br><br>');
+        }
+
+        // Generate summaries for specified hours (or all unsummarized)
+        async function generateSummaries(hours = null) {
+            if (!state.selectedDate) return;
+
+            const btn = document.getElementById('generateAllBtn');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="spinner-small"></span> Generating...';
+            }
+
+            try {
+                const body = { date: state.selectedDate };
+                if (hours) {
+                    body.hours = hours;
+                }
+
+                const response = await fetch('/api/summaries/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'started') {
+                    // Start polling for status
+                    startStatusPolling();
+                } else if (data.status === 'nothing_to_do') {
+                    if (btn) {
+                        btn.style.display = 'none';
+                    }
+                } else if (data.status === 'already_running') {
+                    // Already running, start polling
+                    startStatusPolling();
+                }
+            } catch (error) {
+                console.error('Failed to start summarization:', error);
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = 'Generate All';
+                }
+            }
+        }
+
+        // Poll for summarization status
+        function startStatusPolling() {
+            if (state.pollInterval) {
+                clearInterval(state.pollInterval);
+            }
+
+            state.pollInterval = setInterval(async () => {
+                try {
+                    const response = await fetch('/api/summaries/generate/status');
+                    const status = await response.json();
+
+                    updateGenerationProgress(status);
+
+                    if (!status.running) {
+                        clearInterval(state.pollInterval);
+                        state.pollInterval = null;
+
+                        // Refresh data to show new summaries
+                        if (state.selectedDate) {
+                            await loadDayData(state.selectedDate);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Failed to poll status:', error);
+                    clearInterval(state.pollInterval);
+                    state.pollInterval = null;
+                }
+            }, 2000);
+        }
+
+        // Update UI with generation progress
+        function updateGenerationProgress(status) {
+            const btn = document.getElementById('generateAllBtn');
+            const coverage = document.getElementById('summaryCoverage');
+
+            if (status.running) {
+                if (btn) {
+                    btn.disabled = true;
+                    const hourStr = status.current_hour !== null ? `${status.current_hour}:00` : '';
+                    btn.innerHTML = `<span class="spinner-small"></span> ${status.completed}/${status.total} ${hourStr}`;
+                }
+            } else {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = 'Generate All';
+
+                    // Hide if all done
+                    if (status.error === null && status.completed === status.total) {
+                        btn.style.display = 'none';
+                    }
+                }
+
+                if (status.error) {
+                    console.error('Summarization error:', status.error);
+                }
+            }
+        }
+
+        // Refresh summaries after generation
+        async function refreshSummaries() {
+            if (!state.selectedDate) return;
+
+            try {
+                const response = await fetch(`/api/summaries/${state.selectedDate}`);
+                const data = await response.json();
+
+                if (data.summaries) {
+                    state.summaries = {};
+                    data.summaries.forEach(s => {
+                        if (s.summary) {
+                            state.summaries[s.hour] = s.summary;
+                        }
+                    });
+
+                    // Update daily summary content
+                    const dailySummaryContent = document.getElementById('dailySummaryContent');
+                    if (dailySummaryContent) {
+                        const text = buildDailySummary();
+                        dailySummaryContent.innerHTML = text || '<span class="summary-placeholder">No summaries generated yet.</span>';
+                    }
+
+                    // Update coverage
+                    const coverage = document.getElementById('summaryCoverage');
+                    if (coverage) {
+                        const total = data.summaries.length;
+                        const summarized = Object.keys(state.summaries).length;
+                        coverage.textContent = `${summarized} of ${total} hours summarized`;
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to refresh summaries:', error);
+            }
+        }
+
+        // =====================================================================
+        // Session-based display functions
+        // =====================================================================
+
+        // Toggle summary details visibility
+        function toggleSummaryDetails(sessionId) {
+            const details = document.getElementById(`summary-details-${sessionId}`);
+            if (details) {
+                details.classList.toggle('visible');
+            }
+        }
+
+        // Toggle prompt details visibility
+        function togglePromptDetails(sessionId) {
+            const details = document.getElementById(`prompt-details-${sessionId}`);
+            if (details) {
+                details.classList.toggle('visible');
+            }
+        }
+
+        // Escape HTML to prevent XSS
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Load sessions for the selected date
+        async function loadSessions(dateStr) {
+            try {
+                const response = await fetch(`/api/sessions/${dateStr}`);
+                const data = await response.json();
+
+                if (data.error) {
+                    console.error('Sessions error:', data.error);
+                    return null;
+                }
+
+                return data;
+            } catch (error) {
+                console.error('Failed to load sessions:', error);
+                return null;
+            }
+        }
+
+        // Render sessions in the detail panel
+        function renderSessions(sessionsData) {
+            const detailContent = document.getElementById('detailContent');
+
+            if (!sessionsData || sessionsData.sessions.length === 0) {
+                // Fall back to hourly view if no sessions
+                return false;
+            }
+
+            const sessions = sessionsData.sessions;
+            const pendingCount = sessions.filter(s => !s.summary).length;
+
+            let html = `
+                <div class="sessions-summary">
+                    <div class="sessions-stats">
+                        <strong>${sessions.length}</strong> session${sessions.length !== 1 ? 's' : ''},
+                        <strong>${sessionsData.total_active_minutes}</strong> minutes active
+                        <span class="info-icon">?
+                            <span class="info-tooltip">A session is a continuous period of activity. Sessions are automatically created when you become active and ended when you go AFK (away from keyboard) for more than 3 minutes.</span>
+                        </span>
+                    </div>
+                    ${pendingCount > 0 ? `
+                        <button class="generate-btn" onclick="summarizePendingSessions('${sessionsData.date}')">
+                            Summarize ${pendingCount} pending
+                        </button>
+                    ` : ''}
+                </div>
+                <div class="session-list" id="sessionList">
+            `;
+
+            sessions.forEach(session => {
+                const startTime = new Date(session.start_time);
+                const endTime = session.end_time ? new Date(session.end_time) : null;
+                const startStr = startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const endStr = endTime ? endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'ongoing';
+                const isActive = !session.end_time;
+
+                const statusClass = isActive ? 'active' : (session.summary ? 'summarized' : 'pending');
+                const statusText = isActive ? 'Active' : (session.summary ? 'Summarized' : 'Pending');
+
+                // Calculate sampled screenshots (approx 1 per 10 min, max 10)
+                const durationMin = session.duration_minutes || 0;
+                const idealSamples = Math.max(1, Math.floor(durationMin / 10));
+                const sampledCount = Math.min(idealSamples, 10, session.screenshot_count);
+
+                const inferenceTimeStr = session.inference_time_ms
+                    ? `${(session.inference_time_ms / 1000).toFixed(1)}s`
+                    : 'N/A';
+
+                html += `
+                    <div class="session-card" data-session-id="${session.id}">
+                        <div class="session-header" onclick="toggleSessionExpand(${session.id})">
+                            <div class="session-time">
+                                ${startStr} - ${endStr}
+                                <span class="session-duration">${session.duration_minutes}m</span>
+                                <span class="session-status ${statusClass}">${statusText}</span>
+                            </div>
+                            <div class="session-meta">
+                                <span>${session.screenshot_count} screenshots</span>
+                                <span>${session.unique_windows} windows</span>
+                            </div>
+                        </div>
+                        <div class="session-summary-preview ${session.summary ? '' : 'no-summary'}">
+                            <div style="display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap;">
+                                <span style="flex: 1;">${session.summary || 'No summary yet'}</span>
+                                ${session.summary ? `
+                                    <span class="summary-details-toggle" onclick="event.stopPropagation(); toggleSummaryDetails(${session.id})">
+                                        Details <span class="info-icon" style="margin-left: 2px;">?
+                                            <span class="info-tooltip">View details about how this summary was generated, including the AI model used, inference time, and the exact API request sent to Ollama.</span>
+                                        </span>
+                                    </span>
+                                ` : ''}
+                                ${!session.summary && !isActive ? `
+                                    <button class="generate-btn" onclick="event.stopPropagation(); summarizeSession(${session.id}, this)">
+                                        Generate
+                                    </button>
+                                ` : ''}
+                            </div>
+                            ${session.summary ? `
+                                <div class="summary-details" id="summary-details-${session.id}">
+                                    <div class="summary-details-grid">
+                                        <div class="summary-detail-item">
+                                            <span class="summary-detail-label">Model</span>
+                                            <span class="summary-detail-value model">${session.model_used || 'Unknown'}</span>
+                                        </div>
+                                        <div class="summary-detail-item">
+                                            <span class="summary-detail-label">Inference Time</span>
+                                            <span class="summary-detail-value">${inferenceTimeStr}</span>
+                                        </div>
+                                        <div class="summary-detail-item">
+                                            <span class="summary-detail-label">Screenshots Sampled</span>
+                                            <span class="summary-detail-value">~${sampledCount} of ${session.screenshot_count}</span>
+                                        </div>
+                                        <div class="summary-detail-item">
+                                            <span class="summary-detail-label">Unique Windows</span>
+                                            <span class="summary-detail-value">${session.unique_windows}</span>
+                                        </div>
+                                    </div>
+                                    ${session.prompt_text ? `
+                                        <div class="summary-prompt">
+                                            <div class="summary-prompt-header">
+                                                <span class="summary-prompt-label">API Request</span>
+                                                <span class="summary-prompt-toggle" onclick="togglePromptDetails(${session.id})">Show/Hide</span>
+                                            </div>
+                                            <pre class="summary-prompt-content" id="prompt-details-${session.id}">${escapeHtml(session.prompt_text)}</pre>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            ` : ''}
+                        </div>
+                        <div class="session-screenshots" id="session-screenshots-${session.id}">
+                            <div class="loading"><div class="spinner"></div></div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+            detailContent.innerHTML = html;
+
+            return true;
+        }
+
+        // Toggle session expansion to show screenshots
+        async function toggleSessionExpand(sessionId) {
+            const card = document.querySelector(`[data-session-id="${sessionId}"]`);
+            if (!card) return;
+
+            const isExpanded = card.classList.contains('expanded');
+
+            if (isExpanded) {
+                card.classList.remove('expanded');
+            } else {
+                card.classList.add('expanded');
+
+                // Load screenshots if not already loaded
+                const container = document.getElementById(`session-screenshots-${sessionId}`);
+                if (container && container.querySelector('.loading')) {
+                    await loadSessionScreenshots(sessionId, container);
+                }
+            }
+        }
+
+        // Load screenshots for a specific session
+        async function loadSessionScreenshots(sessionId, container) {
+            try {
+                const response = await fetch(`/api/sessions/${sessionId}/screenshots?per_page=200`);
+                const data = await response.json();
+
+                if (data.error) {
+                    container.innerHTML = '<div class="empty-state"><p>Failed to load screenshots</p></div>';
+                    return;
+                }
+
+                if (data.screenshots.length === 0) {
+                    container.innerHTML = '<div class="empty-state"><p>No screenshots in this session</p></div>';
+                    return;
+                }
+
+                // Store screenshots for this session for modal navigation
+                container.dataset.screenshots = JSON.stringify(data.screenshots);
+
+                container.innerHTML = data.screenshots.map(s => {
+                    const time = new Date(s.timestamp * 1000).toLocaleTimeString();
+                    return `
+                        <div class="screenshot-card">
+                            <img
+                                src="${s.filepath}"
+                                alt="Screenshot at ${time}"
+                                class="screenshot-img session-screenshot"
+                                loading="lazy"
+                                data-id="${s.id}"
+                                data-session-id="${sessionId}"
+                            >
+                            <div class="screenshot-meta">
+                                <div class="screenshot-time">${time}</div>
+                                <div class="screenshot-app">
+                                    <span class="app-badge">${s.app_name || 'Unknown'}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+            } catch (error) {
+                console.error('Failed to load session screenshots:', error);
+                container.innerHTML = '<div class="empty-state"><p>Failed to load screenshots</p></div>';
+            }
+        }
+
+        // Summarize a specific session
+        async function summarizeSession(sessionId, buttonElement = null) {
+            // Find the button if not passed
+            if (!buttonElement) {
+                buttonElement = document.querySelector(`[data-session-id="${sessionId}"] .generate-btn`);
+            }
+
+            // Show loading state immediately
+            if (buttonElement) {
+                buttonElement.classList.add('loading');
+                buttonElement.disabled = true;
+                buttonElement.innerHTML = '<span class="spinner-small"></span> Generating...';
+            }
+
+            try {
+                const response = await fetch(`/api/sessions/${sessionId}/summarize`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'started') {
+                    // Poll for completion
+                    pollSessionSummaryStatus(sessionId);
+                } else if (data.status === 'already_summarized') {
+                    // Refresh the display
+                    if (state.selectedDate) {
+                        await loadDayData(state.selectedDate);
+                    }
+                } else if (data.error) {
+                    // Show error and reset button
+                    console.error('Summarization error:', data.error);
+                    if (buttonElement) {
+                        buttonElement.classList.remove('loading');
+                        buttonElement.disabled = false;
+                        buttonElement.innerHTML = 'Generate';
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to start session summarization:', error);
+                // Reset button on error
+                if (buttonElement) {
+                    buttonElement.classList.remove('loading');
+                    buttonElement.disabled = false;
+                    buttonElement.innerHTML = 'Generate';
+                }
+            }
+        }
+
+        // Poll for session summary completion
+        function pollSessionSummaryStatus(sessionId) {
+            const interval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/api/sessions/${sessionId}/summarize/status`);
+                    const status = await response.json();
+
+                    if (!status.running) {
+                        clearInterval(interval);
+                        // Refresh the display
+                        if (state.selectedDate) {
+                            await loadDayData(state.selectedDate);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Failed to poll session status:', error);
+                    clearInterval(interval);
+                }
+            }, 2000);
+        }
+
+        // Summarize all pending sessions for a date
+        async function summarizePendingSessions(dateStr) {
+            try {
+                const sessionsData = await loadSessions(dateStr);
+                if (!sessionsData) return;
+
+                const pendingSessions = sessionsData.sessions.filter(s => !s.summary && s.end_time);
+
+                for (const session of pendingSessions) {
+                    await summarizeSession(session.id);
+                    // Wait a bit between sessions to avoid overwhelming
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+            } catch (error) {
+                console.error('Failed to summarize pending sessions:', error);
+            }
         }
     </script>
 </body>

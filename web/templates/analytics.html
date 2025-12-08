@@ -464,6 +464,63 @@
         .full-width {
             grid-column: 1 / -1;
         }
+
+        /* Recent Activity card */
+        .recent-activity-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+
+        .recent-activity-card h2 {
+            font-size: 1.1rem;
+            color: var(--accent);
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .activity-list {
+            list-style: none;
+        }
+
+        .activity-item {
+            padding: 12px 0;
+            border-bottom: 1px solid var(--surface-2);
+            display: flex;
+            gap: 12px;
+        }
+
+        .activity-item:last-child {
+            border-bottom: none;
+        }
+
+        .activity-time {
+            font-size: 0.85rem;
+            color: var(--muted);
+            white-space: nowrap;
+            min-width: 80px;
+        }
+
+        .activity-summary {
+            font-size: 0.9rem;
+            color: var(--text);
+            line-height: 1.5;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .no-summaries {
+            color: var(--muted);
+            font-style: italic;
+            padding: 20px 0;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
@@ -505,6 +562,17 @@
         <!-- Summary Cards -->
         <div class="summary-cards" id="summaryCards">
             <!-- Will be populated by JavaScript -->
+        </div>
+
+        <!-- Recent Activity Card -->
+        <div class="recent-activity-card">
+            <h2>
+                <span>✨</span>
+                <span>Recent Activity Summaries</span>
+            </h2>
+            <ul class="activity-list" id="recentActivityList">
+                <li class="no-summaries">Loading...</li>
+            </ul>
         </div>
 
         <!-- Charts Row 1: Daily Activity + App Usage -->
@@ -691,6 +759,7 @@
 
                 // Render all sections
                 renderSummaryCards();
+                renderRecentActivity();
                 renderDailyChart();
                 renderAppChart();
                 renderHourlyHeatmap();
@@ -1162,6 +1231,83 @@
                     }
                 }
             });
+        }
+
+        // Render recent activity summaries
+        async function renderRecentActivity() {
+            const container = document.getElementById('recentActivityList');
+
+            try {
+                // Fetch summaries for the last 3 days
+                const today = new Date();
+                const summaries = [];
+
+                for (let i = 0; i < 3; i++) {
+                    const date = new Date(today);
+                    date.setDate(today.getDate() - i);
+                    const dateStr = formatDate(date);
+
+                    try {
+                        const response = await fetch(`/api/summaries/${dateStr}`);
+                        const data = await response.json();
+
+                        if (data.summaries) {
+                            data.summaries.forEach(s => {
+                                if (s.summary) {
+                                    summaries.push({
+                                        date: dateStr,
+                                        hour: s.hour,
+                                        summary: s.summary
+                                    });
+                                }
+                            });
+                        }
+                    } catch (e) {
+                        // Ignore errors for individual days
+                    }
+                }
+
+                // Sort by date and hour descending, take last 5
+                summaries.sort((a, b) => {
+                    if (a.date !== b.date) return b.date.localeCompare(a.date);
+                    return b.hour - a.hour;
+                });
+
+                const recent = summaries.slice(0, 5);
+
+                if (recent.length === 0) {
+                    container.innerHTML = '<li class="no-summaries">No AI summaries generated yet. Use the Timeline view to generate them.</li>';
+                    return;
+                }
+
+                container.innerHTML = recent.map(s => {
+                    const date = new Date(s.date);
+                    const isToday = formatDate(today) === s.date;
+                    const isYesterday = formatDate(new Date(today.getTime() - 86400000)) === s.date;
+
+                    let dateLabel;
+                    if (isToday) {
+                        dateLabel = 'Today';
+                    } else if (isYesterday) {
+                        dateLabel = 'Yesterday';
+                    } else {
+                        dateLabel = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                    }
+
+                    const hourStr = `${s.hour}:00`;
+
+                    return `
+                        <li class="activity-item">
+                            <span class="activity-time">${dateLabel} ${hourStr}</span>
+                            <span class="activity-summary">${s.summary}</span>
+                        </li>
+                    `;
+                }).join('');
+
+            } catch (error) {
+                console.error('Failed to load recent activity:', error);
+                container.innerHTML = '<li class="no-summaries">Failed to load summaries</li>';
+            }
         }
     </script>
 </body>

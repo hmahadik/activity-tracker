@@ -7,12 +7,16 @@ A Linux background service that automatically captures desktop screenshots at re
 - **Automated Screenshot Capture**: Captures desktop screenshots every 30 seconds
 - **Perceptual Duplicate Detection**: Uses dhash algorithm to skip near-identical screenshots
 - **Window Context Extraction**: Records active window title and application name
-- **Timeline View**: Interactive calendar heatmap with hourly activity breakdown
+- **Session-Based Tracking**: Automatically detects AFK periods to group activity into sessions
+- **AFK Detection**: Uses pynput to monitor keyboard/mouse activity (configurable timeout)
+- **Timeline View**: Interactive calendar heatmap with session-based activity breakdown
 - **Analytics Dashboard**: Comprehensive charts showing activity patterns and trends
 - **Web-based Viewer**: Rich Flask interface with multiple views for browsing and analysis
 - **Efficient Storage**: WebP compression and organized directory structure
 - **Systemd Integration**: Runs as user service with automatic restart
 - **X11 Support**: Optimized for X11 display server (Wayland support planned)
+- **AI Activity Summaries**: Vision LLM-powered session summaries with OCR grounding
+- **Smart Session Resume**: Resumes previous session on restart if within AFK timeout
 
 ## Architecture
 
@@ -34,19 +38,40 @@ A Linux background service that automatically captures desktop screenshots at re
    - Signal handling for graceful shutdown
    - Window information extraction via xdotool
    - Duplicate detection and storage optimization
+   - Session management with AFK detection
+   - Smart session resume on restart
 
-4. **Web Viewer (`web/app.py`)**
+4. **AFK Detection (`tracker/afk.py`)**
+   - Monitors keyboard and mouse activity via pynput
+   - Configurable timeout (default 3 minutes)
+   - Fires callbacks on AFK/active state transitions
+   - Auto-installs missing dependencies
+
+5. **Session Manager (`tracker/sessions.py`)**
+   - Tracks continuous activity periods
+   - Links screenshots to sessions
+   - Handles session start/end with metadata
+   - Minimum session duration filtering
+
+6. **Web Viewer (`web/app.py`)**
    - Flask application with multiple views (timeline, analytics, day view)
-   - Interactive timeline with calendar heatmap and hourly breakdown
+   - Interactive timeline with calendar heatmap and session breakdown
    - Analytics dashboard with charts and statistics
    - Date-based navigation
    - REST API for programmatic access
 
-5. **Analytics Engine (`tracker/analytics.py`)**
+7. **Analytics Engine (`tracker/analytics.py`)**
    - Activity pattern analysis and statistics
    - Calendar heatmap data generation
    - Hourly/daily/weekly aggregations
    - Application usage tracking
+
+8. **Vision Summarizer (`tracker/vision.py`)**
+   - Hybrid OCR + vision LLM for activity understanding
+   - Tesseract OCR for text extraction from screenshots
+   - Ollama integration with configurable vision models
+   - Session-based summary generation with context continuity
+   - Returns full API request details for debugging
 
 ### Data Storage Structure
 
@@ -77,6 +102,51 @@ CREATE TABLE screenshots (
 -- Indexes for performance
 CREATE INDEX idx_timestamp ON screenshots(timestamp);
 CREATE INDEX idx_dhash ON screenshots(dhash);
+
+-- Activity summaries table (hourly - legacy)
+CREATE TABLE activity_summaries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,                   -- YYYY-MM-DD
+    hour INTEGER NOT NULL,                -- 0-23
+    summary TEXT NOT NULL,                -- LLM-generated summary
+    screenshot_ids TEXT NOT NULL,         -- JSON array of screenshot IDs
+    model_used TEXT NOT NULL,             -- e.g., "gemma3:27b-it-qat"
+    inference_time_ms INTEGER NOT NULL,   -- Processing time
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(date, hour)
+);
+
+-- Activity sessions table (continuous periods of user activity)
+CREATE TABLE activity_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    start_time TIMESTAMP NOT NULL,        -- Session start
+    end_time TIMESTAMP,                   -- NULL if ongoing
+    duration_seconds INTEGER,             -- Calculated on session end
+    summary TEXT,                         -- LLM-generated summary
+    screenshot_count INTEGER DEFAULT 0,
+    unique_windows INTEGER DEFAULT 0,
+    model_used TEXT,
+    inference_time_ms INTEGER,
+    prompt_text TEXT,                     -- Full API request for debugging
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Session screenshots junction table
+CREATE TABLE session_screenshots (
+    session_id INTEGER REFERENCES activity_sessions(id),
+    screenshot_id INTEGER REFERENCES screenshots(id),
+    PRIMARY KEY (session_id, screenshot_id)
+);
+
+-- Session OCR cache (per unique window title)
+CREATE TABLE session_ocr_cache (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER REFERENCES activity_sessions(id),
+    window_title TEXT NOT NULL,
+    ocr_text TEXT,
+    screenshot_id INTEGER,
+    UNIQUE(session_id, window_title)
+);
 ```
 
 ## Installation
@@ -132,6 +202,68 @@ systemctl --user status activity-tracker
 journalctl --user -u activity-tracker -f
 ```
 
+### AI Summarization (Optional)
+
+The activity tracker can generate AI-powered summaries of your work using a local vision LLM running in Docker. This requires additional setup:
+
+**Hardware Requirements:**
+- **gemma3:27b-it-qat** (recommended): ~18GB VRAM (RTX 3090, 4090, A6000)
+- **gemma3:14b-it-qat** (alternative): ~8GB VRAM (RTX 3080, 4070)
+- **gemma3:4b-it-qat** (lightweight): ~3GB VRAM (any modern GPU)
+
+**Software Dependencies:**
+
+```bash
+# Install Tesseract OCR
+sudo apt install tesseract-ocr
+
+# Start Ollama Docker container (with GPU support)
+docker run -d --gpus=all \
+  -v ollama:/root/.ollama \
+  -p 11434:11434 \
+  --name ollama \
+  ollama/ollama
+
+# Pull the vision model (choose based on your VRAM)
+docker exec ollama ollama pull gemma3:27b-it-qat    # ~18GB VRAM
+# OR
+docker exec ollama ollama pull gemma3:14b-it-qat    # ~8GB VRAM
+```
+
+**Managing the Ollama Container:**
+
+```bash
+# Stop the container
+docker stop ollama
+
+# Start the container
+docker start ollama
+
+# View container logs
+docker logs ollama
+
+# Check available models
+docker exec ollama ollama list
+```
+
+**Remote Ollama Server:**
+
+To use a remote Ollama server (e.g., on a GPU workstation), set the `OLLAMA_HOST` in `tracker/config.py`:
+
+```python
+OLLAMA_HOST = "http://gpu-server:11434"
+```
+
+Or use the `--ollama-host` CLI flag:
+
+```bash
+python scripts/summarize_activity.py --ollama-host http://gpu-server:11434
+```
+
+**Enable Auto-Summarization:**
+
+When running `./scripts/install.sh`, answer 'y' to "Enable auto-summarization?" to have the daemon automatically generate summaries at :05 past each hour.
+
 ## Usage
 
 ### Running the Service
@@ -175,6 +307,46 @@ python web/app.py
 # Open in browser (runs on port 55555)
 firefox http://localhost:55555
 ```
+
+### AI Summarization
+
+Generate activity summaries from your screenshots:
+
+```bash
+# Summarize today's unsummarized hours
+python scripts/summarize_activity.py
+
+# Summarize a specific date
+python scripts/summarize_activity.py --date 2025-12-01
+
+# Backfill last 7 days
+python scripts/summarize_activity.py --backfill 7
+
+# Summarize only a specific hour
+python scripts/summarize_activity.py --hour 14
+
+# Re-generate existing summaries
+python scripts/summarize_activity.py --force
+
+# Preview what would be processed
+python scripts/summarize_activity.py --dry-run
+
+# Use a different model (for lower VRAM)
+python scripts/summarize_activity.py --model gemma3:14b-it-qat
+```
+
+**How It Works:**
+1. Samples 4-6 screenshots evenly from each hour
+2. Extracts OCR text from the middle screenshot for context
+3. Sends screenshots + OCR to vision LLM with summarization prompt
+4. Stores results in database with timing info
+
+**Web Interface:**
+- Timeline view shows ✨ badges on hours with summaries
+- Click "Generate" on any hour to create a summary
+- "Generate All" processes all unsummarized hours
+- Daily Summary section shows concatenated hourly summaries
+- Analytics dashboard displays recent activity summaries
 
 #### Available Views
 
@@ -283,6 +455,60 @@ curl "http://localhost:55555/api/screenshots/2024-12-03/14"
 curl "http://localhost:55555/api/week/2024-12-03"
 ```
 
+#### Summarization Endpoints
+
+**Get summaries for a date:**
+```bash
+curl "http://localhost:55555/api/summaries/2024-12-03"
+# Returns: { "date": "...", "summaries": [{"hour": 9, "summary": "...", "screenshot_count": 6}, ...] }
+```
+
+**Get summary coverage stats:**
+```bash
+curl "http://localhost:55555/api/summaries/coverage"
+# Returns: { "total_days": 14, "summarized_hours": 89, "total_hours": 120, "coverage_pct": 74.2 }
+```
+
+**Generate summaries (background):**
+```bash
+curl -X POST "http://localhost:55555/api/summaries/generate" \
+  -H "Content-Type: application/json" \
+  -d '{"date": "2024-12-03", "hours": [9, 10, 11]}'
+# Returns: { "status": "started", "hours_queued": 3 }
+```
+
+**Check generation status:**
+```bash
+curl "http://localhost:55555/api/summaries/generate/status"
+# Returns: { "running": true, "current_hour": 10, "completed": 1, "total": 3 }
+```
+
+#### Session Endpoints
+
+**Get sessions for a date:**
+```bash
+curl "http://localhost:55555/api/sessions/2024-12-03"
+# Returns: { "date": "...", "sessions": [...], "total_active_minutes": 420, "session_count": 4 }
+```
+
+**Get screenshots for a session:**
+```bash
+curl "http://localhost:55555/api/sessions/42/screenshots?page=1&per_page=50"
+# Returns: { "session_id": 42, "screenshots": [...], "total": 300 }
+```
+
+**Get current active session:**
+```bash
+curl "http://localhost:55555/api/sessions/current"
+# Returns: { "session": {...} or null, "is_afk": true/false }
+```
+
+**Summarize a session:**
+```bash
+curl -X POST "http://localhost:55555/api/sessions/42/summarize"
+# Returns: { "status": "started" }
+```
+
 See [API_ENDPOINTS.md](API_ENDPOINTS.md) for complete documentation.
 
 ## Development
@@ -296,17 +522,22 @@ activity-tracker/
 │   ├── capture.py             # Screenshot capture and dhash
 │   ├── storage.py             # SQLite database interface
 │   ├── daemon.py              # Background service process
-│   └── analytics.py           # Activity analytics and statistics
+│   ├── analytics.py           # Activity analytics and statistics
+│   ├── vision.py              # AI summarization (OCR + LLM)
+│   ├── afk.py                 # AFK detection via pynput
+│   ├── sessions.py            # Session management
+│   └── config.py              # Configuration settings
 ├── web/                       # Web interface
 │   ├── app.py                 # Flask application with REST API
 │   └── templates/             # HTML templates
 │       ├── base.html          # Base template with navigation
-│       ├── timeline.html      # Calendar heatmap view
+│       ├── timeline.html      # Calendar heatmap view (with summaries)
 │       ├── analytics.html     # Analytics dashboard
 │       └── day.html           # Daily screenshot view
 ├── scripts/                   # Installation and utilities
 │   ├── install.sh             # Systemd service setup
-│   └── uninstall.sh          # Service removal
+│   ├── uninstall.sh           # Service removal
+│   └── summarize_activity.py  # CLI for generating summaries
 ├── tests/                     # Test suite
 │   ├── conftest.py            # Pytest fixtures
 │   ├── test_capture.py        # Capture tests
@@ -409,15 +640,20 @@ chmod 644 ~/activity-tracker-data/activity.db
 - [x] **Timeline View**: Calendar heatmap with hourly breakdown
 - [x] **Charts & Visualization**: Interactive charts using Chart.js
 - [x] **Comprehensive Test Suite**: Pytest-based testing with 85% coverage
+- [x] **AI Summarization**: Vision LLM-powered hourly activity summaries with OCR grounding
+- [x] **Auto-Summarization**: Background summarization at :05 past each hour
+- [x] **Session-Based Tracking**: AFK detection with pynput, session management
+- [x] **Smart Session Resume**: Resume previous session on restart if within timeout
+- [x] **Summary Debugging**: View exact API requests sent to Ollama
 
 ### Planned
 - [ ] **Wayland Support**: Add sway/wlroots integration for window information
 - [ ] **Multi-monitor Support**: Capture specific monitors or all monitors
 - [ ] **Configuration File**: YAML-based settings for intervals and thresholds
-- [ ] **OCR Integration**: Extract text content from screenshots
 - [ ] **Privacy Filters**: Blur sensitive areas or skip certain applications
 - [ ] **Export Features**: Generate reports and data exports (CSV/JSON/PDF)
 - [ ] **Search & Tagging**: Search screenshots by window title, add custom tags
+- [ ] **Daily Rollup Summaries**: Consolidate session summaries into daily digests
 
 ## License
 

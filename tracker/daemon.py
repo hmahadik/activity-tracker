@@ -54,6 +54,8 @@ from PIL import Image
 from .capture import ScreenCapture
 from .storage import ActivityStorage
 from .app_inference import get_app_name_with_inference
+from .afk import AFKWatcher
+from .sessions import SessionManager
 
 
 class ActivityDaemon:
@@ -85,16 +87,20 @@ class ActivityDaemon:
         ...     daemon.log("Shutdown requested")
     """
     
-    def __init__(self, enable_web=False, web_port=55555):
+    def __init__(self, enable_web=False, web_port=55555, auto_summarize=True,
+                 afk_timeout=180, afk_poll_time=5.0):
         """Initialize the activity daemon with default configuration.
-        
+
         Sets up screenshot capture, database storage, signal handlers, and
         initializes tracking state for duplicate detection.
-        
+
         Args:
             enable_web (bool): Whether to start the web server
             web_port (int): Port for the web server (default: 55555)
-        
+            auto_summarize (bool): Whether to auto-summarize sessions on AFK (default True)
+            afk_timeout (int): Seconds of inactivity before considered AFK (default 180)
+            afk_poll_time (float): How often to check AFK status (default 5.0)
+
         Signal handlers are registered for:
         - SIGTERM: Graceful shutdown (systemd stop)
         - SIGINT: Interrupt signal (Ctrl+C)
@@ -107,10 +113,25 @@ class ActivityDaemon:
         self.web_port = web_port
         self.flask_app = None
         self.web_thread = None
-        
+        self.auto_summarize = auto_summarize
+        self.last_summarized_hour = None
+        self.summarize_thread = None
+
+        # Session management
+        self.session_manager = SessionManager(self.storage)
+        self.current_session_id = None
+
+        # AFK detection
+        self.afk_watcher = AFKWatcher(
+            timeout=afk_timeout,
+            poll_time=afk_poll_time,
+            on_afk=self._handle_afk,
+            on_active=self._handle_active,
+        )
+
         if enable_web:
             self._setup_flask_app()
-        
+
         # Set up signal handlers
         signal.signal(signal.SIGTERM, self._signal_handler)
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -157,6 +178,211 @@ class ActivityDaemon:
         if self.web_thread and self.web_thread.is_alive():
             self.log("Stopping web server...")
             # Flask doesn't have a clean shutdown method, thread will end when daemon stops
+
+    def _handle_active(self):
+        """Called when user becomes active after AFK.
+
+        Starts a new session to track the upcoming activity period.
+        """
+        self.current_session_id = self.session_manager.start_session()
+        self.log(f"Started session {self.current_session_id}")
+
+    def _handle_afk(self):
+        """Called when user goes AFK.
+
+        Ends the current session and triggers summarization if enabled.
+        """
+        if self.current_session_id:
+            session = self.session_manager.end_session(self.current_session_id)
+            if session:  # Was long enough
+                self.log(f"Ended session {self.current_session_id}, duration: {session.get('duration_seconds', 0) // 60}m")
+                if self.auto_summarize:
+                    # Run in background thread to not block
+                    threading.Thread(
+                        target=self._summarize_session,
+                        args=(session,),
+                        daemon=True
+                    ).start()
+            self.current_session_id = None
+
+    def _summarize_session(self, session: dict):
+        """Background summarization of completed session.
+
+        Args:
+            session: Session dict with id, start_time, etc.
+        """
+        try:
+            from .vision import HybridSummarizer
+            from . import config
+
+            summarizer = HybridSummarizer(
+                model=config.SUMMARIZER_MODEL,
+                ollama_host=config.OLLAMA_HOST,
+            )
+
+            if not summarizer.is_available():
+                self.log("Summarizer not available (check Ollama and Tesseract)")
+                return
+
+            session_id = session["id"]
+
+            # Get screenshots for session
+            screenshots = self.storage.get_session_screenshots(session_id)
+            if len(screenshots) < 2:
+                self.log(f"Session {session_id}: Not enough screenshots for summary")
+                return
+
+            # Process OCR for unique window titles
+            unique_titles = self.storage.get_unique_window_titles_for_session(session_id)
+            ocr_texts = []
+
+            for title in unique_titles:
+                # Check cache first
+                cached = self.storage.get_cached_ocr(session_id, title)
+                if cached is not None:
+                    ocr_texts.append({"window_title": title, "ocr_text": cached})
+                    continue
+
+                # Find a screenshot with this title
+                for s in screenshots:
+                    if s.get("window_title") == title:
+                        try:
+                            ocr_text = summarizer.extract_ocr(s["filepath"])
+                            self.storage.cache_ocr(session_id, title, ocr_text, s["id"])
+                            ocr_texts.append({"window_title": title, "ocr_text": ocr_text})
+                        except Exception as e:
+                            self.log(f"OCR failed for '{title}': {e}")
+                        break
+
+            # Get previous session summary for context
+            recent_summaries = self.storage.get_recent_summaries(1)
+            previous_summary = recent_summaries[0] if recent_summaries else None
+
+            # Generate summary
+            self.log(f"Generating summary for session {session_id}...")
+            summary, inference_ms, prompt_text = summarizer.summarize_session(
+                screenshots=screenshots,
+                ocr_texts=ocr_texts,
+                previous_summary=previous_summary,
+            )
+
+            # Save to database
+            self.storage.save_session_summary(
+                session_id=session_id,
+                summary=summary,
+                model=summarizer.model,
+                inference_ms=inference_ms,
+                prompt_text=prompt_text,
+            )
+
+            self.log(f"Session {session_id}: {summary}")
+
+        except Exception as e:
+            self.log(f"Summarization error for session {session.get('id')}: {e}")
+
+    def _should_trigger_summarization(self) -> tuple[bool, int]:
+        """Check if we should trigger hourly summarization.
+
+        Summarization is triggered at :05 past each hour for the previous hour.
+
+        Returns:
+            tuple[bool, int]: (should_summarize, hour_to_summarize)
+        """
+        now = datetime.now()
+
+        # Only trigger at :05 past the hour (with some tolerance)
+        if now.minute < 5 or now.minute > 10:
+            return False, -1
+
+        # Calculate the previous hour to summarize
+        previous_hour = now.hour - 1
+        if previous_hour < 0:
+            previous_hour = 23
+
+        # Don't re-summarize the same hour
+        if self.last_summarized_hour == (now.date(), previous_hour):
+            return False, -1
+
+        return True, previous_hour
+
+    def _run_summarization(self, date_str: str, hour: int):
+        """Run summarization for a specific hour in background thread."""
+        try:
+            from .vision import HybridSummarizer
+            from . import config
+
+            summarizer = HybridSummarizer(
+                model=config.SUMMARIZER_MODEL,
+                ollama_host=config.OLLAMA_HOST,
+            )
+
+            if not summarizer.is_available():
+                self.log("Summarizer not available (check Ollama and Tesseract)")
+                return
+
+            # Get screenshots for the hour
+            date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+            start_ts = int(date_obj.timestamp()) + hour * 3600
+            end_ts = start_ts + 3600
+
+            screenshots = self.storage.get_screenshots(start_ts, end_ts - 1)
+
+            if len(screenshots) < 2:
+                self.log(f"Skipping {hour}:00 - only {len(screenshots)} screenshot(s)")
+                return
+
+            # Sample if too many
+            if len(screenshots) > config.SUMMARIZER_SAMPLES_PER_HOUR:
+                step = len(screenshots) / config.SUMMARIZER_SAMPLES_PER_HOUR
+                indices = [int(i * step) for i in range(config.SUMMARIZER_SAMPLES_PER_HOUR)]
+                screenshots = [screenshots[i] for i in indices]
+
+            # Get paths and IDs
+            data_dir = Path.home() / "activity-tracker-data" / "screenshots"
+            paths = [str(data_dir / s["filepath"]) for s in screenshots]
+            screenshot_ids = [s["id"] for s in screenshots]
+
+            self.log(f"Generating summary for {hour}:00 ({len(screenshots)} screenshots)...")
+
+            start_time = time.time()
+            summary = summarizer.summarize_hour(paths)
+            inference_ms = int((time.time() - start_time) * 1000)
+
+            self.storage.save_summary(
+                date=date_str,
+                hour=hour,
+                summary=summary,
+                screenshot_ids=screenshot_ids,
+                model=summarizer.model,
+                inference_ms=inference_ms,
+            )
+
+            self.log(f"Summary for {hour}:00 generated in {inference_ms}ms")
+
+        except Exception as e:
+            self.log(f"Summarization error for {hour}:00: {e}")
+
+    def _trigger_summarization(self, hour: int):
+        """Trigger summarization for an hour in a background thread."""
+        now = datetime.now()
+        date_str = now.strftime("%Y-%m-%d")
+
+        # If it's a new day (hour 23 from yesterday)
+        if hour == 23 and now.hour == 0:
+            from datetime import timedelta
+            yesterday = now - timedelta(days=1)
+            date_str = yesterday.strftime("%Y-%m-%d")
+
+        # Mark as summarized before starting to avoid re-triggering
+        self.last_summarized_hour = (now.date(), hour)
+
+        # Run in background thread to not block capture
+        self.summarize_thread = threading.Thread(
+            target=self._run_summarization,
+            args=(date_str, hour),
+            daemon=True
+        )
+        self.summarize_thread.start()
     
     def log(self, message: str):
         """Log a timestamped message to stderr.
@@ -307,41 +533,83 @@ class ActivityDaemon:
     
     def run(self):
         """Start the main daemon loop for continuous screenshot monitoring.
-        
+
         Runs indefinitely until interrupted by signal or error. Captures screenshots
         every 30 seconds, performs duplicate detection, extracts window information,
         and stores metadata to database.
-        
+
         The main loop:
         1. Capture screenshot and compute perceptual hash
         2. Check for similarity with previous screenshot
         3. Extract active window information via xdotool
         4. Store metadata to SQLite database
-        5. Sleep for 30 seconds
-        6. Repeat until shutdown signal received
-        
+        5. Link screenshot to current session
+        6. Sleep for 30 seconds
+        7. Repeat until shutdown signal received
+
         Raises:
             KeyboardInterrupt: If interrupted by Ctrl+C (gracefully handled)
             Exception: For unexpected errors (logged and daemon continues)
-            
+
         Example:
             >>> daemon = ActivityDaemon()
             >>> try:
             ...     daemon.run()
             ... except KeyboardInterrupt:
             ...     print("Daemon stopped")
-            
+
         Note:
             This method blocks until the daemon is stopped via signal.
             For systemd integration, stdout/stderr are redirected to journal.
         """
         self.log("Activity daemon starting...")
-        
+
+        # Start AFK watcher
+        self.afk_watcher.start()
+
+        # Check for active session from database (e.g., after restart)
+        active_session = self.storage.get_active_session()
+        if active_session:
+            session_id = active_session["id"]
+            last_ts = self.storage.get_last_screenshot_timestamp_for_session(session_id)
+
+            if last_ts:
+                # Check if last activity was within AFK timeout
+                seconds_since_last = int(time.time()) - last_ts
+                if seconds_since_last < self.afk_watcher.timeout:
+                    # Resume the session - last activity was recent enough
+                    resumed_session = self.session_manager.resume_active_session()
+                    self.current_session_id = resumed_session
+                    self.log(f"Resumed active session {resumed_session} (last activity {seconds_since_last}s ago)")
+                else:
+                    # End the old session (was AFK) and start fresh
+                    self.log(f"Previous session {session_id} stale ({seconds_since_last}s since last activity)")
+                    session = self.session_manager.end_session(session_id)
+                    if session and self.auto_summarize:
+                        # Summarize the old session in background
+                        threading.Thread(
+                            target=self._summarize_session,
+                            args=(session,),
+                            daemon=True
+                        ).start()
+                    # Start new session
+                    self.current_session_id = self.session_manager.start_session()
+                    self.log(f"Started new session {self.current_session_id}")
+            else:
+                # No screenshots in session yet, just resume it
+                resumed_session = self.session_manager.resume_active_session()
+                self.current_session_id = resumed_session
+                self.log(f"Resumed empty session {resumed_session}")
+        else:
+            # No active session, start a new one
+            self.current_session_id = self.session_manager.start_session()
+            self.log(f"Started initial session {self.current_session_id}")
+
         # Start web server in separate thread if enabled
         if self.enable_web:
             self.web_thread = threading.Thread(target=self._start_web_server, daemon=True)
             self.web_thread.start()
-        
+
         while self.running:
             try:
                 # Capture screenshot
@@ -375,7 +643,20 @@ class ActivityDaemon:
                     window_title=window_title,
                     app_name=app_name
                 )
-                
+
+                # Link to current session if active
+                if self.current_session_id:
+                    self.session_manager.add_screenshot_to_session(
+                        self.current_session_id, screenshot_id
+                    )
+                    # Track window title for OCR optimization
+                    if window_title:
+                        is_new = self.session_manager.track_window_title(
+                            self.current_session_id, window_title
+                        )
+                        if is_new:
+                            self.log(f"New window in session: {window_title[:50]}")
+
                 self.last_dhash = current_dhash
                 self.log(f"Saved screenshot {screenshot_id}: {Path(filepath).name}")
                 
@@ -384,12 +665,31 @@ class ActivityDaemon:
                 # Should implement exponential backoff and distinguish between recoverable/fatal errors
                 self.log(f"Error in capture loop: {e}")
             
+            # Check if we should trigger auto-summarization
+            if self.auto_summarize:
+                should_summarize, hour = self._should_trigger_summarization()
+                if should_summarize:
+                    self._trigger_summarization(hour)
+
             # Sleep for 30 seconds
             for _ in range(30):
                 if not self.running:
                     break
                 time.sleep(1)
-        
+
+        # Cleanup on shutdown
+        self.log("Shutting down...")
+
+        # Stop AFK watcher
+        self.afk_watcher.stop()
+
+        # End any active session
+        if self.current_session_id:
+            session = self.session_manager.end_session(self.current_session_id)
+            if session:
+                self.log(f"Ended session {self.current_session_id} on shutdown")
+            self.current_session_id = None
+
         self.log("Activity daemon stopped")
 
 
@@ -397,8 +697,20 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Activity tracking daemon")
     parser.add_argument("--web", action="store_true", help="Enable web server")
     parser.add_argument("--web-port", type=int, default=55555, help="Web server port (default: 55555)")
-    
+    parser.add_argument("--auto-summarize", action="store_true",
+                        help="Enable auto-summarization of sessions on AFK")
+    parser.add_argument("--afk-timeout", type=int, default=180,
+                        help="Seconds of inactivity before considered AFK (default: 180)")
+    parser.add_argument("--afk-poll", type=float, default=5.0,
+                        help="How often to check AFK status in seconds (default: 5.0)")
+
     args = parser.parse_args()
-    
-    daemon = ActivityDaemon(enable_web=args.web, web_port=args.web_port)
+
+    daemon = ActivityDaemon(
+        enable_web=args.web,
+        web_port=args.web_port,
+        auto_summarize=args.auto_summarize,
+        afk_timeout=args.afk_timeout,
+        afk_poll_time=args.afk_poll,
+    )
     daemon.run()

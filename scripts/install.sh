@@ -20,6 +20,45 @@ SERVICE_FILE="$SYSTEMD_DIR/activity-tracker.service"
 
 echo -e "${GREEN}Installing Activity Tracker...${NC}"
 
+# Check for optional dependencies (summarization features)
+echo "Checking optional dependencies for AI summarization..."
+
+if which tesseract > /dev/null 2>&1; then
+    echo -e "  ${GREEN}✓${NC} tesseract found"
+else
+    echo -e "  ${YELLOW}!${NC} tesseract not found - Install: sudo apt install tesseract-ocr"
+fi
+
+# Check for Ollama Docker container
+if which docker > /dev/null 2>&1; then
+    echo -e "  ${GREEN}✓${NC} docker found"
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^ollama$"; then
+        echo -e "  ${GREEN}✓${NC} ollama container running"
+        # Check if model is available
+        if docker exec ollama ollama list 2>/dev/null | grep -q "gemma3:27b"; then
+            echo -e "  ${GREEN}✓${NC} gemma3:27b model available"
+        else
+            echo -e "  ${YELLOW}!${NC} gemma3:27b model not found - Run:"
+            echo -e "      docker exec ollama ollama pull gemma3:27b-it-qat"
+            echo -e "      (or gemma3:14b-it-qat for 8GB VRAM cards)"
+        fi
+    else
+        echo -e "  ${YELLOW}!${NC} ollama container not running - Start with:"
+        echo -e "      docker run -d --gpus=all -v ollama:/root/.ollama -p 11434:11434 --name ollama ollama/ollama"
+    fi
+else
+    echo -e "  ${YELLOW}!${NC} docker not found - Install Docker to use Ollama container"
+fi
+
+# Check Ollama API connectivity
+if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
+    echo -e "  ${GREEN}✓${NC} Ollama API responding at http://localhost:11434"
+else
+    echo -e "  ${YELLOW}!${NC} Ollama API not responding at http://localhost:11434"
+fi
+
+echo
+
 # Create systemd user directory if it doesn't exist
 echo "Creating systemd user directory..."
 mkdir -p "$SYSTEMD_DIR"
@@ -35,6 +74,13 @@ EXEC_START="$PROJECT_DIR/venv/bin/python -m tracker.daemon"
 if [[ "$ENABLE_WEB" =~ ^[Yy]$ ]]; then
     EXEC_START="$EXEC_START --web"
     echo "Web interface will be enabled on http://0.0.0.0:55555"
+fi
+
+# Ask user if they want auto-summarization enabled
+read -p "Enable auto-summarization? (requires tesseract + ollama) (y/N): " ENABLE_SUMMARIZE
+if [[ "$ENABLE_SUMMARIZE" =~ ^[Yy]$ ]]; then
+    EXEC_START="$EXEC_START --auto-summarize"
+    echo "Auto-summarization will generate hourly summaries at :05 past each hour"
 fi
 
 # Create systemd service file
@@ -62,6 +108,7 @@ EOF
 
 systemctl --user daemon-reload
 systemctl --user enable --now activity-tracker
+systemctl --user restart activity-tracker
 
 echo -e "${GREEN}Installation complete!${NC}"
 echo
@@ -78,5 +125,5 @@ echo -e "${YELLOW}Service file created at:${NC} $SERVICE_FILE"
 if [[ "$ENABLE_WEB" =~ ^[Yy]$ ]]; then
     echo
     echo -e "${GREEN}Web interface enabled!${NC}"
-    echo "Access the activity viewer at: ${YELLOW}http://0.0.0.0:55555${NC}"
+    echo -e "Access the activity viewer at: ${YELLOW}http://0.0.0.0:55555${NC}"
 fi

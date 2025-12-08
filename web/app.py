@@ -2,18 +2,32 @@
 
 import os
 import sqlite3
+import threading
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
 from flask import Flask, render_template, send_file, jsonify, request, abort
 
 from tracker.analytics import ActivityAnalytics
+from tracker.storage import ActivityStorage
+from tracker.sessions import SessionManager
+from tracker.vision import HybridSummarizer
 
 app = Flask(__name__)
 
 DATA_DIR = Path.home() / "activity-tracker-data"
 DB_PATH = DATA_DIR / "activity.db"
 SCREENSHOTS_DIR = DATA_DIR / "screenshots"
+
+# Global state for background summarization
+summarization_state = {
+    "running": False,
+    "current_hour": None,
+    "completed": 0,
+    "total": 0,
+    "date": None,
+    "error": None,
+}
 
 
 def get_db_connection():
@@ -332,6 +346,540 @@ def api_screenshots_by_hour(date_string, hour):
         })
     except Exception as e:
         return jsonify({"error": f"Failed to get screenshots: {str(e)}"}), 500
+
+
+@app.route('/api/summaries/<date_string>')
+def api_summaries_for_date(date_string):
+    """JSON API for activity summaries for a specific date."""
+    try:
+        target_date = datetime.strptime(date_string, '%Y-%m-%d').date()
+    except ValueError:
+        return jsonify({"error": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+    try:
+        storage = ActivityStorage()
+
+        # Get existing summaries
+        summaries = storage.get_summaries_for_date(date_string)
+        summaries_by_hour = {s["hour"]: s for s in summaries}
+
+        # Get screenshot counts per hour
+        start_timestamp = int(datetime.combine(target_date, datetime.min.time()).timestamp())
+
+        conn = get_db_connection()
+        cursor = conn.execute("""
+            SELECT CAST((timestamp - ?) / 3600 AS INTEGER) as hour,
+                   COUNT(*) as count
+            FROM screenshots
+            WHERE timestamp >= ? AND timestamp < ?
+            GROUP BY hour
+        """, (start_timestamp, start_timestamp, start_timestamp + 86400))
+
+        hour_counts = {row["hour"]: row["count"] for row in cursor.fetchall()}
+        conn.close()
+
+        # Build response with all hours that have data
+        result = []
+        for hour in sorted(set(summaries_by_hour.keys()) | set(hour_counts.keys())):
+            summary_data = summaries_by_hour.get(hour)
+            result.append({
+                "hour": hour,
+                "summary": summary_data["summary"] if summary_data else None,
+                "screenshot_count": hour_counts.get(hour, 0),
+            })
+
+        # Get daily summary if exists
+        daily_summary_data = storage.get_daily_summary(date_string)
+        daily_summary = daily_summary_data["summary"] if daily_summary_data else None
+
+        return jsonify({
+            "date": date_string,
+            "summaries": result,
+            "daily_summary": daily_summary,
+        })
+    except Exception as e:
+        return jsonify({"error": f"Failed to get summaries: {str(e)}"}), 500
+
+
+@app.route('/api/summaries/coverage')
+def api_summaries_coverage():
+    """JSON API for summary coverage statistics."""
+    try:
+        storage = ActivityStorage()
+        coverage = storage.get_summary_coverage()
+
+        # Calculate total days
+        total_days = 0
+        if coverage["date_range"]:
+            start = datetime.strptime(coverage["date_range"]["start"], "%Y-%m-%d")
+            end = datetime.strptime(coverage["date_range"]["end"], "%Y-%m-%d")
+            total_days = (end - start).days + 1
+
+        total_hours = coverage["total_hours_with_screenshots"]
+        summarized_hours = coverage["total_hours_summarized"]
+        coverage_pct = (summarized_hours / total_hours * 100) if total_hours > 0 else 0
+
+        return jsonify({
+            "total_days": total_days,
+            "summarized_hours": summarized_hours,
+            "total_hours": total_hours,
+            "coverage_pct": round(coverage_pct, 1),
+        })
+    except Exception as e:
+        return jsonify({"error": f"Failed to get coverage: {str(e)}"}), 500
+
+
+def _run_summarization(date_str: str, hours: list[int]):
+    """Background thread function to run summarization."""
+    global summarization_state
+
+    try:
+        storage = ActivityStorage()
+        summarizer = HybridSummarizer()
+
+        if not summarizer.is_available():
+            summarization_state["error"] = "Summarizer not available (check Ollama and Tesseract)"
+            summarization_state["running"] = False
+            return
+
+        for hour in hours:
+            if not summarization_state["running"]:
+                break  # Allow cancellation
+
+            summarization_state["current_hour"] = hour
+
+            # Get screenshots for this hour
+            date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+            start_ts = int(date_obj.timestamp()) + hour * 3600
+            end_ts = start_ts + 3600
+
+            conn = get_db_connection()
+            cursor = conn.execute("""
+                SELECT id, filepath FROM screenshots
+                WHERE timestamp >= ? AND timestamp < ?
+                ORDER BY timestamp ASC
+            """, (start_ts, end_ts))
+            screenshots = [dict(row) for row in cursor.fetchall()]
+            conn.close()
+
+            if len(screenshots) < 2:
+                summarization_state["completed"] += 1
+                continue
+
+            # Sample if too many
+            if len(screenshots) > 6:
+                step = len(screenshots) / 6
+                indices = [int(i * step) for i in range(6)]
+                screenshots = [screenshots[i] for i in indices]
+
+            paths = [str(SCREENSHOTS_DIR / s["filepath"]) for s in screenshots]
+            screenshot_ids = [s["id"] for s in screenshots]
+
+            try:
+                import time
+                start_time = time.time()
+                summary = summarizer.summarize_hour(paths)
+                inference_ms = int((time.time() - start_time) * 1000)
+
+                storage.save_summary(
+                    date=date_str,
+                    hour=hour,
+                    summary=summary,
+                    screenshot_ids=screenshot_ids,
+                    model=summarizer.model,
+                    inference_ms=inference_ms,
+                )
+            except Exception as e:
+                summarization_state["error"] = f"Hour {hour}: {str(e)}"
+
+            summarization_state["completed"] += 1
+
+    except Exception as e:
+        summarization_state["error"] = str(e)
+    finally:
+        summarization_state["running"] = False
+        summarization_state["current_hour"] = None
+
+
+@app.route('/api/summaries/generate', methods=['POST'])
+def api_generate_summaries():
+    """Start background summarization for a date."""
+    global summarization_state
+
+    if summarization_state["running"]:
+        return jsonify({
+            "status": "already_running",
+            "date": summarization_state["date"],
+            "hours_remaining": summarization_state["total"] - summarization_state["completed"],
+        }), 409
+
+    data = request.get_json() or {}
+    date_str = data.get("date", datetime.now().strftime("%Y-%m-%d"))
+
+    # Validate date
+    try:
+        datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError:
+        return jsonify({"error": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+    # Get hours to process
+    hours = data.get("hours")
+    if hours is None:
+        storage = ActivityStorage()
+        hours = storage.get_unsummarized_hours(date_str)
+
+    if not hours:
+        return jsonify({
+            "status": "nothing_to_do",
+            "message": "No unsummarized hours found for this date",
+        })
+
+    # Reset state and start background thread
+    summarization_state.update({
+        "running": True,
+        "current_hour": None,
+        "completed": 0,
+        "total": len(hours),
+        "date": date_str,
+        "error": None,
+    })
+
+    thread = threading.Thread(target=_run_summarization, args=(date_str, hours))
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({
+        "status": "started",
+        "hours_queued": len(hours),
+    })
+
+
+@app.route('/api/summaries/generate/status')
+def api_generate_status():
+    """Get current summarization progress."""
+    return jsonify({
+        "running": summarization_state["running"],
+        "current_hour": summarization_state["current_hour"],
+        "completed": summarization_state["completed"],
+        "total": summarization_state["total"],
+        "date": summarization_state["date"],
+        "error": summarization_state["error"],
+    })
+
+
+# =============================================================================
+# Session-based API endpoints
+# =============================================================================
+
+@app.route('/api/sessions/<date_string>')
+def api_sessions_for_date(date_string):
+    """JSON API for sessions on a specific date.
+
+    Returns:
+        {
+            "date": "2025-12-01",
+            "sessions": [
+                {
+                    "id": 42,
+                    "start_time": "2025-12-01T14:00:00",
+                    "end_time": "2025-12-01T16:30:00",
+                    "duration_minutes": 150,
+                    "summary": "Implementing hybrid mode...",
+                    "screenshot_count": 300,
+                    "unique_windows": 5
+                },
+                ...
+            ],
+            "total_active_minutes": 420,
+            "session_count": 4
+        }
+    """
+    try:
+        datetime.strptime(date_string, '%Y-%m-%d')
+    except ValueError:
+        return jsonify({"error": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+    try:
+        storage = ActivityStorage()
+        session_manager = SessionManager(storage)
+
+        sessions = session_manager.get_sessions_for_date(date_string)
+
+        # Format sessions for response
+        formatted_sessions = []
+        total_active_seconds = 0
+
+        for session in sessions:
+            duration_seconds = session.get("duration_seconds") or 0
+            total_active_seconds += duration_seconds
+
+            formatted_sessions.append({
+                "id": session["id"],
+                "start_time": session["start_time"],
+                "end_time": session.get("end_time"),
+                "duration_minutes": duration_seconds // 60,
+                "summary": session.get("summary"),
+                "screenshot_count": session.get("screenshot_count", 0),
+                "unique_windows": session.get("unique_windows", 0),
+                "model_used": session.get("model_used"),
+                "inference_time_ms": session.get("inference_time_ms"),
+                "prompt_text": session.get("prompt_text"),
+            })
+
+        return jsonify({
+            "date": date_string,
+            "sessions": formatted_sessions,
+            "total_active_minutes": total_active_seconds // 60,
+            "session_count": len(formatted_sessions),
+        })
+    except Exception as e:
+        return jsonify({"error": f"Failed to get sessions: {str(e)}"}), 500
+
+
+@app.route('/api/sessions/<int:session_id>/screenshots')
+def api_session_screenshots(session_id):
+    """JSON API for screenshots in a specific session.
+
+    Supports pagination via 'page' and 'per_page' query parameters.
+
+    Returns:
+        {
+            "session_id": 42,
+            "screenshots": [...],
+            "total": 300,
+            "page": 1,
+            "per_page": 50
+        }
+    """
+    try:
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 50))
+    except ValueError:
+        return jsonify({"error": "page and per_page must be integers"}), 400
+
+    if page < 1 or per_page < 1 or per_page > 200:
+        return jsonify({"error": "Invalid pagination parameters"}), 400
+
+    try:
+        storage = ActivityStorage()
+
+        # Verify session exists
+        session = storage.get_session(session_id)
+        if not session:
+            return jsonify({"error": "Session not found"}), 404
+
+        # Get all screenshots for session
+        all_screenshots = storage.get_session_screenshots(session_id)
+        total = len(all_screenshots)
+
+        # Apply pagination
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        paginated = all_screenshots[start_idx:end_idx]
+
+        # Format for response
+        screenshots = []
+        for s in paginated:
+            screenshots.append({
+                "id": s["id"],
+                "timestamp": s["timestamp"],
+                "filepath": f"/screenshot/{s['id']}",
+                "window_title": s.get("window_title"),
+                "app_name": s.get("app_name"),
+                "iso_time": datetime.fromtimestamp(s["timestamp"]).isoformat(),
+            })
+
+        return jsonify({
+            "session_id": session_id,
+            "screenshots": screenshots,
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+        })
+    except Exception as e:
+        return jsonify({"error": f"Failed to get screenshots: {str(e)}"}), 500
+
+
+@app.route('/api/sessions/current')
+def api_current_session():
+    """JSON API for the currently active session.
+
+    Returns:
+        {
+            "session": {...} or null,
+            "is_afk": true/false
+        }
+    """
+    try:
+        storage = ActivityStorage()
+        session_manager = SessionManager(storage)
+
+        active_session = session_manager.get_current_session()
+
+        if active_session:
+            # Calculate current duration
+            start_time = datetime.fromisoformat(active_session["start_time"])
+            current_duration = int((datetime.now() - start_time).total_seconds())
+
+            return jsonify({
+                "session": {
+                    "id": active_session["id"],
+                    "start_time": active_session["start_time"],
+                    "duration_minutes": current_duration // 60,
+                    "screenshot_count": active_session.get("screenshot_count", 0),
+                    "unique_windows": active_session.get("unique_windows", 0),
+                },
+                "is_afk": False,
+            })
+        else:
+            return jsonify({
+                "session": None,
+                "is_afk": True,
+            })
+    except Exception as e:
+        return jsonify({"error": f"Failed to get current session: {str(e)}"}), 500
+
+
+# Session summarization state
+session_summarization_state = {
+    "running": False,
+    "session_id": None,
+    "error": None,
+}
+
+
+def _run_session_summarization(session_id: int):
+    """Background thread function to run session summarization."""
+    global session_summarization_state
+
+    try:
+        storage = ActivityStorage()
+        summarizer = HybridSummarizer()
+
+        if not summarizer.is_available():
+            session_summarization_state["error"] = "Summarizer not available"
+            session_summarization_state["running"] = False
+            return
+
+        # Get session
+        session = storage.get_session(session_id)
+        if not session:
+            session_summarization_state["error"] = "Session not found"
+            session_summarization_state["running"] = False
+            return
+
+        # Get screenshots
+        screenshots = storage.get_session_screenshots(session_id)
+        if len(screenshots) < 2:
+            session_summarization_state["error"] = "Not enough screenshots"
+            session_summarization_state["running"] = False
+            return
+
+        # Process OCR
+        unique_titles = storage.get_unique_window_titles_for_session(session_id)
+        ocr_texts = []
+
+        for title in unique_titles:
+            cached = storage.get_cached_ocr(session_id, title)
+            if cached is not None:
+                ocr_texts.append({"window_title": title, "ocr_text": cached})
+                continue
+
+            for s in screenshots:
+                if s.get("window_title") == title:
+                    try:
+                        ocr_text = summarizer.extract_ocr(s["filepath"])
+                        storage.cache_ocr(session_id, title, ocr_text, s["id"])
+                        ocr_texts.append({"window_title": title, "ocr_text": ocr_text})
+                    except Exception:
+                        pass
+                    break
+
+        # Get previous summary for context
+        recent_summaries = storage.get_recent_summaries(1)
+        previous_summary = recent_summaries[0] if recent_summaries else None
+
+        # Generate summary
+        summary, inference_ms, prompt_text = summarizer.summarize_session(
+            screenshots=screenshots,
+            ocr_texts=ocr_texts,
+            previous_summary=previous_summary,
+        )
+
+        # Save
+        storage.save_session_summary(
+            session_id=session_id,
+            summary=summary,
+            model=summarizer.model,
+            inference_ms=inference_ms,
+            prompt_text=prompt_text,
+        )
+
+    except Exception as e:
+        session_summarization_state["error"] = str(e)
+    finally:
+        session_summarization_state["running"] = False
+        session_summarization_state["session_id"] = None
+
+
+@app.route('/api/sessions/<int:session_id>/summarize', methods=['POST'])
+def api_summarize_session(session_id):
+    """Manually trigger summarization for a specific session.
+
+    Returns:
+        {"status": "started"} or {"status": "already_summarized"} or error
+    """
+    global session_summarization_state
+
+    if session_summarization_state["running"]:
+        return jsonify({
+            "status": "already_running",
+            "session_id": session_summarization_state["session_id"],
+        }), 409
+
+    try:
+        storage = ActivityStorage()
+
+        # Verify session exists
+        session = storage.get_session(session_id)
+        if not session:
+            return jsonify({"error": "Session not found"}), 404
+
+        # Check if already summarized
+        if session.get("summary") and not request.json.get("force"):
+            return jsonify({
+                "status": "already_summarized",
+                "summary": session["summary"],
+            })
+
+        # Start background summarization
+        session_summarization_state.update({
+            "running": True,
+            "session_id": session_id,
+            "error": None,
+        })
+
+        thread = threading.Thread(
+            target=_run_session_summarization,
+            args=(session_id,)
+        )
+        thread.daemon = True
+        thread.start()
+
+        return jsonify({"status": "started"})
+
+    except Exception as e:
+        return jsonify({"error": f"Failed to start summarization: {str(e)}"}), 500
+
+
+@app.route('/api/sessions/<int:session_id>/summarize/status')
+def api_session_summarize_status(session_id):
+    """Get current session summarization progress."""
+    return jsonify({
+        "running": session_summarization_state["running"] and session_summarization_state["session_id"] == session_id,
+        "session_id": session_summarization_state["session_id"],
+        "error": session_summarization_state["error"],
+    })
 
 
 if __name__ == '__main__':
