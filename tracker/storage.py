@@ -1437,7 +1437,10 @@ class ActivityStorage:
     # =========================================================================
 
     def get_summaries_in_range(self, start: 'datetime', end: 'datetime') -> List[Dict]:
-        """Get threshold summaries within a datetime range.
+        """Get all summaries within a datetime range.
+
+        Queries both threshold_summaries and activity_sessions tables
+        to find all available summaries.
 
         Args:
             start: Start datetime (inclusive).
@@ -1446,29 +1449,53 @@ class ActivityStorage:
         Returns:
             List of summary dicts ordered by start_time.
         """
-        from datetime import datetime as dt
+        results = []
 
         with self.get_connection() as conn:
+            # Get threshold summaries
             cursor = conn.execute(
                 """
                 SELECT id, start_time, end_time, summary, screenshot_ids,
                        screenshot_count, model_used, config_snapshot,
-                       inference_time_ms, created_at, regenerated_from
+                       inference_time_ms, created_at, regenerated_from,
+                       'threshold' as source
                 FROM threshold_summaries
                 WHERE datetime(start_time) >= datetime(?)
-                  AND datetime(end_time) <= datetime(?)
+                  AND datetime(start_time) <= datetime(?)
                 ORDER BY start_time ASC
                 """,
                 (start.isoformat(), end.isoformat()),
             )
-            results = []
             for row in cursor.fetchall():
                 result = dict(row)
                 result['screenshot_ids'] = json.loads(result['screenshot_ids'])
                 if result['config_snapshot']:
                     result['config_snapshot'] = json.loads(result['config_snapshot'])
                 results.append(result)
-            return results
+
+            # Get session summaries
+            cursor = conn.execute(
+                """
+                SELECT id, start_time, end_time, summary, screenshot_count,
+                       model_used, inference_time_ms,
+                       'session' as source
+                FROM activity_sessions
+                WHERE summary IS NOT NULL
+                  AND datetime(start_time) >= datetime(?)
+                  AND datetime(start_time) <= datetime(?)
+                ORDER BY start_time ASC
+                """,
+                (start.isoformat(), end.isoformat()),
+            )
+            for row in cursor.fetchall():
+                result = dict(row)
+                result['screenshot_ids'] = []  # Sessions don't store this directly
+                result['config_snapshot'] = None
+                results.append(result)
+
+        # Sort all results by start_time
+        results.sort(key=lambda x: x['start_time'])
+        return results
 
     def get_screenshots_in_range(self, start: 'datetime', end: 'datetime') -> List[Dict]:
         """Get screenshots within a datetime range.
