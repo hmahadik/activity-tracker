@@ -202,8 +202,8 @@ class ReportGenerator:
         Returns:
             ReportAnalytics with all metrics computed.
         """
-        # Active time from sessions
-        total_minutes = sum(s.get('duration_seconds', 0) // 60 for s in sessions)
+        # Active time from sessions (handle None values)
+        total_minutes = sum((s.get('duration_seconds') or 0) // 60 for s in sessions)
 
         # App usage from screenshots
         interval_minutes = self.config.config.capture.interval_seconds / 60
