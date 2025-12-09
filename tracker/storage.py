@@ -278,6 +278,28 @@ class ActivityStorage:
                 CREATE INDEX IF NOT EXISTS idx_ocr_session ON session_ocr_cache(session_id)
             """)
 
+            # Threshold-based summaries - trigger every N screenshots
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS threshold_summaries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    start_time TIMESTAMP NOT NULL,
+                    end_time TIMESTAMP NOT NULL,
+                    summary TEXT NOT NULL,
+                    screenshot_ids TEXT NOT NULL,
+                    screenshot_count INTEGER NOT NULL,
+                    model_used TEXT NOT NULL,
+                    config_snapshot TEXT,
+                    inference_time_ms INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    regenerated_from INTEGER REFERENCES threshold_summaries(id)
+                )
+            """)
+
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_threshold_summary_time
+                ON threshold_summaries(start_time, end_time)
+            """)
+
             conn.commit()
     
     def save_screenshot(self, filepath: str, dhash: str, window_title: str = None,
@@ -1183,3 +1205,229 @@ class ActivityStorage:
             )
             row = cursor.fetchone()
             return row["last_ts"] if row and row["last_ts"] else None
+
+    # ==================== Threshold-Based Summary Methods ====================
+
+    def get_unsummarized_screenshots(self) -> List[Dict]:
+        """Get screenshots not covered by any threshold summary.
+
+        Returns:
+            List of screenshot dicts ordered by timestamp, each containing
+            id, timestamp, filepath, window_title, app_name.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT s.id, s.timestamp, s.filepath, s.window_title, s.app_name,
+                       s.window_x, s.window_y, s.window_width, s.window_height
+                FROM screenshots s
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM threshold_summaries ts
+                    WHERE ts.screenshot_ids LIKE '%' || s.id || '%'
+                      AND s.timestamp >= strftime('%s', ts.start_time)
+                      AND s.timestamp <= strftime('%s', ts.end_time)
+                )
+                ORDER BY s.timestamp ASC
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_last_threshold_summary(self) -> Optional[Dict]:
+        """Get the most recent threshold summary for context continuity.
+
+        Returns:
+            Summary dict or None if no summaries exist.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT id, start_time, end_time, summary, screenshot_ids,
+                       screenshot_count, model_used, config_snapshot,
+                       inference_time_ms, created_at, regenerated_from
+                FROM threshold_summaries
+                ORDER BY end_time DESC
+                LIMIT 1
+            """)
+            row = cursor.fetchone()
+            if row:
+                result = dict(row)
+                result['screenshot_ids'] = json.loads(result['screenshot_ids'])
+                if result['config_snapshot']:
+                    result['config_snapshot'] = json.loads(result['config_snapshot'])
+                return result
+            return None
+
+    def save_threshold_summary(
+        self,
+        start_time: str,
+        end_time: str,
+        summary: str,
+        screenshot_ids: List[int],
+        model: str,
+        config_snapshot: dict,
+        inference_ms: int,
+        regenerated_from: int = None
+    ) -> int:
+        """Save a new threshold-based summary.
+
+        Args:
+            start_time: ISO format timestamp of first screenshot
+            end_time: ISO format timestamp of last screenshot
+            summary: The generated summary text
+            screenshot_ids: List of screenshot IDs included
+            model: Model used for generation
+            config_snapshot: Dict of config settings used
+            inference_ms: Time taken for inference
+            regenerated_from: ID of original summary if this is a regeneration
+
+        Returns:
+            ID of the new summary record.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO threshold_summaries
+                    (start_time, end_time, summary, screenshot_ids, screenshot_count,
+                     model_used, config_snapshot, inference_time_ms, regenerated_from)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    start_time,
+                    end_time,
+                    summary,
+                    json.dumps(screenshot_ids),
+                    len(screenshot_ids),
+                    model,
+                    json.dumps(config_snapshot) if config_snapshot else None,
+                    inference_ms,
+                    regenerated_from,
+                ),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_threshold_summary(self, summary_id: int) -> Optional[Dict]:
+        """Get a threshold summary by ID.
+
+        Args:
+            summary_id: The summary ID to retrieve.
+
+        Returns:
+            Summary dict or None if not found.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, start_time, end_time, summary, screenshot_ids,
+                       screenshot_count, model_used, config_snapshot,
+                       inference_time_ms, created_at, regenerated_from
+                FROM threshold_summaries
+                WHERE id = ?
+                """,
+                (summary_id,),
+            )
+            row = cursor.fetchone()
+            if row:
+                result = dict(row)
+                result['screenshot_ids'] = json.loads(result['screenshot_ids'])
+                if result['config_snapshot']:
+                    result['config_snapshot'] = json.loads(result['config_snapshot'])
+                return result
+            return None
+
+    def get_threshold_summaries_for_date(self, date: str) -> List[Dict]:
+        """Get all threshold summaries for a specific date.
+
+        Args:
+            date: Date string in YYYY-MM-DD format.
+
+        Returns:
+            List of summary dicts ordered by start_time.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, start_time, end_time, summary, screenshot_ids,
+                       screenshot_count, model_used, config_snapshot,
+                       inference_time_ms, created_at, regenerated_from
+                FROM threshold_summaries
+                WHERE date(start_time) = ?
+                ORDER BY start_time ASC
+                """,
+                (date,),
+            )
+            results = []
+            for row in cursor.fetchall():
+                result = dict(row)
+                result['screenshot_ids'] = json.loads(result['screenshot_ids'])
+                if result['config_snapshot']:
+                    result['config_snapshot'] = json.loads(result['config_snapshot'])
+                results.append(result)
+            return results
+
+    def get_summary_versions(self, original_id: int) -> List[Dict]:
+        """Get all versions of a summary (original + regenerations).
+
+        Args:
+            original_id: The root summary ID.
+
+        Returns:
+            List of all versions including original, ordered by created_at.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, start_time, end_time, summary, screenshot_ids,
+                       screenshot_count, model_used, config_snapshot,
+                       inference_time_ms, created_at, regenerated_from
+                FROM threshold_summaries
+                WHERE id = ? OR regenerated_from = ?
+                ORDER BY created_at ASC
+                """,
+                (original_id, original_id),
+            )
+            results = []
+            for row in cursor.fetchall():
+                result = dict(row)
+                result['screenshot_ids'] = json.loads(result['screenshot_ids'])
+                if result['config_snapshot']:
+                    result['config_snapshot'] = json.loads(result['config_snapshot'])
+                results.append(result)
+            return results
+
+    def delete_threshold_summary(self, summary_id: int) -> bool:
+        """Delete a threshold summary.
+
+        Args:
+            summary_id: The summary ID to delete.
+
+        Returns:
+            True if deleted, False if not found.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM threshold_summaries WHERE id = ?",
+                (summary_id,),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_screenshot_by_id(self, screenshot_id: int) -> Optional[Dict]:
+        """Get a screenshot by its ID.
+
+        Args:
+            screenshot_id: The screenshot ID.
+
+        Returns:
+            Screenshot dict or None if not found.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, timestamp, filepath, window_title, app_name,
+                       window_x, window_y, window_width, window_height,
+                       monitor_name, monitor_width, monitor_height
+                FROM screenshots
+                WHERE id = ?
+                """,
+                (screenshot_id,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None

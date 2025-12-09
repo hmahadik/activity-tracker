@@ -1095,5 +1095,170 @@ def get_status():
         return jsonify({"error": f"Failed to get status: {str(e)}"}), 500
 
 
+# ==================== Threshold-Based Summary API ====================
+
+# Global reference to summarizer worker (set by daemon when running)
+summarizer_worker = None
+
+
+def set_summarizer_worker(worker):
+    """Set the summarizer worker reference for API access."""
+    global summarizer_worker
+    summarizer_worker = worker
+
+
+@app.route('/api/threshold-summaries/<date>')
+def api_get_threshold_summaries(date):
+    """Get all threshold summaries for a date.
+
+    Args:
+        date: Date string in YYYY-MM-DD format
+
+    Returns:
+        {"summaries": [...], "date": "2025-12-09"}
+    """
+    try:
+        storage = ActivityStorage()
+        summaries = storage.get_threshold_summaries_for_date(date)
+        return jsonify({
+            "date": date,
+            "summaries": summaries
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/threshold-summaries/<int:summary_id>/regenerate', methods=['POST'])
+def api_regenerate_summary(summary_id):
+    """Queue a summary for regeneration with current settings.
+
+    Returns:
+        {"status": "queued", "summary_id": 123}
+    """
+    global summarizer_worker
+
+    if summarizer_worker is None:
+        # Try to create a worker if daemon isn't running
+        try:
+            from tracker.summarizer_worker import SummarizerWorker
+            storage = ActivityStorage()
+            worker = SummarizerWorker(storage, config_manager)
+            worker.start()
+            worker.queue_regenerate(summary_id)
+            return jsonify({
+                "status": "queued",
+                "summary_id": summary_id,
+                "note": "Started standalone worker"
+            })
+        except Exception as e:
+            return jsonify({"error": f"Summarizer not available: {e}"}), 503
+
+    summarizer_worker.queue_regenerate(summary_id)
+    return jsonify({
+        "status": "queued",
+        "summary_id": summary_id
+    })
+
+
+@app.route('/api/threshold-summaries/<int:summary_id>/history')
+def api_get_summary_history(summary_id):
+    """Get all versions of a summary (original + regenerations).
+
+    Returns:
+        {
+            "original_id": 1,
+            "versions": [...],
+            "current_config": {...}
+        }
+    """
+    try:
+        storage = ActivityStorage()
+        original = storage.get_threshold_summary(summary_id)
+
+        if not original:
+            return jsonify({"error": "Summary not found"}), 404
+
+        # Find the root if this is a regeneration
+        root_id = summary_id
+        while original and original.get('regenerated_from'):
+            root_id = original['regenerated_from']
+            original = storage.get_threshold_summary(root_id)
+
+        # Get all versions
+        versions = storage.get_summary_versions(root_id)
+
+        return jsonify({
+            "original_id": root_id,
+            "versions": versions,
+            "current_config": config_manager.to_dict()['summarization']
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/threshold-summaries/<int:summary_id>', methods=['DELETE'])
+def api_delete_summary(summary_id):
+    """Delete a threshold summary.
+
+    Returns:
+        {"status": "deleted"}
+    """
+    try:
+        storage = ActivityStorage()
+        deleted = storage.delete_threshold_summary(summary_id)
+
+        if not deleted:
+            return jsonify({"error": "Summary not found"}), 404
+
+        return jsonify({"status": "deleted"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/threshold-summaries/pending')
+def api_get_pending_count():
+    """Get count of screenshots waiting for summarization.
+
+    Returns:
+        {
+            "unsummarized_count": 7,
+            "threshold": 10,
+            "ready_batches": 0
+        }
+    """
+    try:
+        storage = ActivityStorage()
+        unsummarized = storage.get_unsummarized_screenshots()
+        threshold = config_manager.config.summarization.trigger_threshold
+
+        return jsonify({
+            "unsummarized_count": len(unsummarized),
+            "threshold": threshold,
+            "ready_batches": len(unsummarized) // threshold
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/threshold-summaries/worker-status')
+def api_get_worker_status():
+    """Get summarizer worker status.
+
+    Returns:
+        {"running": true, "current_task": "summarize", "queue_size": 2}
+    """
+    global summarizer_worker
+
+    if summarizer_worker is None:
+        return jsonify({
+            "running": False,
+            "current_task": None,
+            "queue_size": 0,
+            "note": "Worker not attached (daemon may not be running)"
+        })
+
+    return jsonify(summarizer_worker.get_status())
+
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=55555)

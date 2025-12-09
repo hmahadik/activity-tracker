@@ -74,18 +74,18 @@ class SummarizationConfig:
         enabled: Enable automatic summarization (default: True)
         model: Ollama model to use (default: gemma3:27b-it-qat)
         ollama_host: Ollama API host URL (default: http://localhost:11434)
-        max_samples_per_session: Max screenshots to send to LLM (default: 10)
-        auto_summarize_on_afk: Automatically summarize when going AFK (default: True)
+        trigger_threshold: Number of screenshots to trigger summarization (default: 10)
         ocr_enabled: Enable OCR text extraction (default: True)
         crop_to_window: Use cropped window screenshots for better accuracy (default: True)
+        include_previous_summary: Include previous summary for context continuity (default: True)
     """
     enabled: bool = True
     model: str = "gemma3:27b-it-qat"
     ollama_host: str = "http://localhost:11434"
-    max_samples_per_session: int = 10
-    auto_summarize_on_afk: bool = True
+    trigger_threshold: int = 10
     ocr_enabled: bool = True
     crop_to_window: bool = True
+    include_previous_summary: bool = True
 
 
 @dataclass
@@ -224,14 +224,25 @@ class ConfigManager:
         Note:
             Uses ** unpacking to merge dict values with dataclass defaults.
             Missing keys in dict will use dataclass default values.
+            Unknown keys are filtered out for backward compatibility.
         """
+        def filter_known_fields(data_dict: dict, dataclass_type) -> dict:
+            """Filter dict to only include fields known by the dataclass."""
+            import dataclasses
+            known_fields = {f.name for f in dataclasses.fields(dataclass_type)}
+            filtered = {k: v for k, v in data_dict.items() if k in known_fields}
+            unknown = set(data_dict.keys()) - known_fields
+            if unknown:
+                logger.debug(f"Ignoring unknown config fields: {unknown}")
+            return filtered
+
         # Get data for each section, defaulting to empty dict if missing
-        capture_data = data.get('capture', {})
-        afk_data = data.get('afk', {})
-        summarization_data = data.get('summarization', {})
-        storage_data = data.get('storage', {})
-        web_data = data.get('web', {})
-        privacy_data = data.get('privacy', {})
+        capture_data = filter_known_fields(data.get('capture', {}), CaptureConfig)
+        afk_data = filter_known_fields(data.get('afk', {}), AFKConfig)
+        summarization_data = filter_known_fields(data.get('summarization', {}), SummarizationConfig)
+        storage_data = filter_known_fields(data.get('storage', {}), StorageConfig)
+        web_data = filter_known_fields(data.get('web', {}), WebConfig)
+        privacy_data = filter_known_fields(data.get('privacy', {}), PrivacyConfig)
 
         return Config(
             capture=CaptureConfig(**capture_data),

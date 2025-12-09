@@ -66,6 +66,8 @@ from .app_inference import get_app_name_with_inference
 from .afk import AFKWatcher
 from .sessions import SessionManager
 from .monitors import get_monitors, get_monitor_for_window, get_primary_monitor
+from .config import get_config_manager
+from .summarizer_worker import SummarizerWorker
 
 
 class ActivityDaemon:
@@ -123,21 +125,28 @@ class ActivityDaemon:
         self.web_port = web_port
         self.flask_app = None
         self.web_thread = None
-        self.auto_summarize = auto_summarize
         self.last_summarized_hour = None
         self.summarize_thread = None
+
+        # Configuration manager
+        self.config = get_config_manager()
 
         # Session management
         self.session_manager = SessionManager(self.storage)
         self.current_session_id = None
 
-        # AFK detection
+        # AFK detection (for session tracking, not summarization)
         self.afk_watcher = AFKWatcher(
             timeout=afk_timeout,
             poll_time=afk_poll_time,
             on_afk=self._handle_afk,
             on_active=self._handle_active,
         )
+
+        # Threshold-based summarization worker
+        self.summarizer_worker = SummarizerWorker(self.storage, self.config)
+        if self.config.config.summarization.enabled:
+            self.summarizer_worker.start()
 
         if enable_web:
             self._setup_flask_app()
@@ -174,8 +183,11 @@ class ActivityDaemon:
             sys.path.insert(0, str(project_root))
 
         # Import the existing Flask app from web/app.py
-        from web.app import app
+        from web.app import app, set_summarizer_worker
         self.flask_app = app
+
+        # Set the summarizer worker reference for API access
+        set_summarizer_worker(self.summarizer_worker)
     
     def _start_web_server(self):
         """Start the Flask web server in a separate thread."""
@@ -200,19 +212,13 @@ class ActivityDaemon:
     def _handle_afk(self):
         """Called when user goes AFK.
 
-        Ends the current session and triggers summarization if enabled.
+        Ends the current session for analytics tracking. Summarization is now
+        handled by the threshold-based SummarizerWorker, not AFK events.
         """
         if self.current_session_id:
             session = self.session_manager.end_session(self.current_session_id)
             if session:  # Was long enough
                 self.log(f"Ended session {self.current_session_id}, duration: {session.get('duration_seconds', 0) // 60}m")
-                if self.auto_summarize:
-                    # Run in background thread to not block
-                    threading.Thread(
-                        target=self._summarize_session,
-                        args=(session,),
-                        daemon=True
-                    ).start()
             self.current_session_id = None
 
     def _summarize_session(self, session: dict):
@@ -790,17 +796,14 @@ class ActivityDaemon:
 
                 self.last_dhash = current_dhash
                 self.log(f"Saved screenshot {screenshot_id}: {Path(filepath).name}")
-                
+
+                # Check if threshold reached for summarization
+                self.summarizer_worker.check_and_queue()
+
             except Exception as e:
                 # TODO: Edge case - daemon should be more resilient to errors and not crash
                 # Should implement exponential backoff and distinguish between recoverable/fatal errors
                 self.log(f"Error in capture loop: {e}")
-            
-            # Check if we should trigger auto-summarization
-            if self.auto_summarize:
-                should_summarize, hour = self._should_trigger_summarization()
-                if should_summarize:
-                    self._trigger_summarization(hour)
 
             # Sleep for 30 seconds
             for _ in range(30):
@@ -813,6 +816,9 @@ class ActivityDaemon:
 
         # Stop AFK watcher
         self.afk_watcher.stop()
+
+        # Stop summarizer worker
+        self.summarizer_worker.stop()
 
         # End any active session
         if self.current_session_id:
