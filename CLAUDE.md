@@ -28,10 +28,10 @@ Linux background service that captures screenshots at intervals, stores metadata
 - Web viewer: localhost:5000
 
 ## Key Constraints
-- X11 first (Wayland support later)
-- Fixed 30-second intervals for MVP
-- No OCR in MVP
-- Single monitor assumption for MVP
+- X11 only (Wayland not supported - requires xdotool + xrandr)
+- Configurable capture intervals (default 30 seconds)
+- OCR via Tesseract (optional, for AI summarization)
+- Multi-monitor support (captures active monitor only)
 
 ## File Structure
 ```
@@ -49,7 +49,8 @@ activity-tracker/
 │   ├── sessions.py          # Session management
 │   ├── timeparser.py        # Natural language time range parser
 │   ├── reports.py           # Report generator with analytics
-│   └── report_export.py     # Export reports to Markdown/HTML/PDF/JSON
+│   ├── report_export.py     # Export reports to Markdown/HTML/PDF/JSON
+│   └── window_watcher.py    # Real-time window focus tracking
 ├── web/
 │   ├── app.py               # Flask application with REST API
 │   └── templates/
@@ -142,6 +143,139 @@ activity-tracker/
 - Reports stored in ~/activity-tracker-data/reports/
 - Default model changed to gemma3:12b-it-qat (better balance of speed/quality)
 - Added 1h keepalive to Ollama API calls for faster subsequent responses
+
+### 2025-12-09 - Phase 5: Window Focus Tracking
+- Real-time window focus tracking (window_watcher.py)
+  - WindowWatcher class with polling loop and callback support
+  - WindowFocusEvent dataclass with duration tracking
+  - Uses xdotool/xprop for X11 window detection
+- Focus-aware screenshot capture in daemon
+  - Stability threshold: wait for focus to settle before capture
+  - Max interval multiplier: force capture after extended time
+  - Skip transient windows (notifications, popups, tooltips)
+  - Configurable via tracking section in config.yaml
+- Focus events stored in window_focus_events table
+  - Links to sessions for context
+  - Duration and app/window tracking
+- Focus context in AI summarization
+  - Time breakdown by app/window in prompts
+  - Context switches counted
+  - Helps LLM understand work patterns
+- Focus Analytics API endpoints:
+  - /api/analytics/focus/<date> - Daily focus analytics
+  - /api/analytics/focus/timeline - Timeline visualization data
+  - /api/analytics/focus/summary - Summary for reports
+- Analytics dashboard enhanced with Focus Tracking section:
+  - Tracked time, context switches, longest focus metrics
+  - Visual timeline with app color coding
+  - Top windows table by time spent
+  - Deep work sessions list (10+ min focused)
+
+### 2025-12-09 - Phase 6: App/Window Focus Context (Simplified)
+- **Simplified approach**: Instead of complex project detection, we pass raw app/window
+  usage data directly to the LLM and let it interpret activities
+- Focus events already capture app_name, window_title, duration_seconds
+- Summarization now sends:
+  - Time breakdown by app/window (aggregated from focus events)
+  - Context switches count
+  - Screenshots (sampled based on focus time)
+  - OCR text from unique windows
+- LLM prompt guidance:
+  - Focus on where most time was spent
+  - Use specific project names visible in content
+  - Do NOT assume different apps/windows are related unless clearly same project
+- Backward compatible: `project` column exists but not populated for new summaries
+- Focus-weighted screenshot sampling for LLM
+  - Sampling reflects focus duration distribution (80% terminal time → 80% terminal screenshots)
+  - Configurable via summarization section:
+    - sample_interval_minutes: target interval between samples (default: 10)
+    - max_samples: maximum screenshots per batch (default: 10)
+    - focus_weighted_sampling: enable weighted sampling (default: true)
+  - Falls back to uniform sampling when focus data unavailable
+  - Sorted chronologically after weighting for natural flow
+- Summarization mode selection
+  - Replaced ocr_enabled toggle with summarization_mode dropdown
+  - Three modes: "ocr_and_screenshots", "screenshots_only", "ocr_only"
+  - Allows LLM to work with just text or just images
+- Ollama host configurable from settings page
+- Report generation uses configured model (not hardcoded)
+
+### 2025-12-10 - Phase 7: Simplified Summarization Settings + Thumbnails
+- **Simplified AI Summarization UI** - Reduced from 10 confusing settings to 4 clear controls:
+  - Enable Summarization (toggle)
+  - Model (dropdown with Ollama models)
+  - Summary Frequency (time-based: Every 5/15/30/60 min)
+  - Summary Quality (presets: Quick/Balanced/Thorough)
+  - Content to Include (multi-select checkboxes):
+    - Window titles + duration (focus context)
+    - Screenshots (visual context)
+    - OCR text (extracted text)
+- **Quality Presets** - Auto-configure underlying settings:
+  - Quick: 5 samples, no previous context, no focus-weighting
+  - Balanced: 10 samples, with context, focus-weighted
+  - Thorough: 15 samples, with context, focus-weighted
+- **Collapsible Advanced Settings** showing:
+  - Ollama Host, Crop to Window
+  - Underlying settings (update when preset changes)
+  - Dynamic prompt template preview
+- **Prompt Template Preview** - Shows exact prompt that will be sent to LLM:
+  - Updates in real-time when content options change
+  - Shows which sections are included/excluded
+  - Warning if no content options selected
+- **Config changes** (config.py):
+  - Added: frequency_minutes, quality_preset
+  - Added: include_focus_context, include_screenshots, include_ocr (multi-select)
+  - Kept underlying settings for backward compatibility
+- **Thumbnail generation** for faster timeline loading:
+  - 200px width, WebP format, 75% quality (~4KB each vs ~500KB originals)
+  - Stored in ~/activity-tracker-data/thumbnails/
+  - Migration script: scripts/generate_thumbnails.py
+  - On-demand generation for new screenshots
+- **API Request display** in summary details:
+  - prompt_text column in threshold_summaries table
+  - Shows exact prompt sent to Ollama for debugging
+- **Bug fixes**:
+  - Fixed daily summary exceeding Ollama context window (limited to 20 summaries, 150 chars each)
+  - Fixed loading spinner not clearing in timeline
+  - Fixed 'summarization_mode' attribute error after refactor
+  - **Fixed summarization triggering** - Now uses actual duration-based triggering:
+    - Checks time elapsed since last summary, not screenshot count
+    - frequency_minutes setting now works as expected (e.g., 15 min = summary every 15 minutes)
+    - Old trigger_threshold was never computed from frequency_minutes (hardcoded to 30)
+  - **Fixed focus tracking duration** in AI prompts:
+    - Focus events now clipped to project-specific time range (not batch range)
+    - Previously: batch covers 8:00-12:00, project A only 10:00-11:00, but durations clipped to 8:00-12:00
+    - Fix: `_summarize_project_batch()` re-clips focus durations to project screenshot time range
+    - Added get_focus_events_overlapping_range() to capture events spanning the range
+  - **Fixed frequency_minutes not working** - summaries triggered every 2 min instead of 15 min:
+    - Frequency check was using `end_time` (screenshot timestamp) instead of `created_at` (when job ran)
+    - When summarizing old screenshots, `end_time` could be hours ago, causing immediate re-trigger
+    - Fix: Use `created_at` field in `check_and_queue()` to track when summarization job last ran
+
+### 2025-12-11 - Phase 8: Simplifications & Bug Fixes
+- **Removed project detection complexity**:
+  - Removed `project_detector.py` import from summarizer_worker
+  - No longer grouping screenshots by detected project before summarization
+  - LLM receives raw app/window usage breakdown and interprets activities itself
+  - Simpler code, more transparent (LLM sees what we see)
+  - Added prompt guidance: "Do NOT assume different apps/windows are related unless clearly same project"
+- **Settings page improvements**:
+  - Renamed "Window titles + duration" to "App/window usage breakdown" with clearer description
+  - Updated prompt template preview to show realistic example of focus data
+  - Fixed "You have unsaved changes" showing on page load (was calling trackChange during init)
+- **Timeline timezone fix**:
+  - Fixed timeline showing wrong date (e.g., Dec 12 instead of Dec 11 at 9 PM local time)
+  - Problem: `toISOString().split('T')[0]` returns UTC date, not local
+  - Solution: Added `getLocalDateString(date)` helper using local year/month/day
+  - Fixed all 5 instances: initial load, today link, keyboard shortcut, day navigation, calendar highlight
+  - Removed duplicate dead code function
+- **Code cleanup**:
+  - Removed `_summarize_project_batch()` method (~80 lines)
+  - Removed `project=` parameter from summary save calls
+  - `project` column kept in DB for backward compatibility but not populated
+
+## Future Improvements
+- **Database normalization**: Unify `threshold_summaries` and `daily_summaries` into single `summaries` table with type field (threshold, hourly, daily, weekly, custom), plus separate `prompts` table for API request storage. Supports hierarchical relationships (daily→hourly→threshold).
 
 ## Known Issues (TODO Comments Added)
 - **Multi-monitor support**: ✅ RESOLVED - Captures only active monitor, stores monitor metadata

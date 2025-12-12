@@ -521,6 +521,226 @@
             padding: 20px 0;
             text-align: center;
         }
+
+        /* Focus Analytics Styles */
+        .section-header {
+            font-size: 1.3rem;
+            color: var(--accent);
+            margin: 30px 0 20px 0;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .focus-metrics {
+            margin-bottom: 30px;
+        }
+
+        .metrics-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .metric-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+
+        .metric-card:hover {
+            transform: translateY(-2px);
+            border-color: var(--accent);
+        }
+
+        .metric-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--accent);
+            margin-bottom: 5px;
+        }
+
+        .metric-label {
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        .metric-hint {
+            color: var(--muted-strong);
+            font-size: 0.75rem;
+            margin-top: 5px;
+        }
+
+        .metric-sub {
+            color: var(--text);
+            font-size: 0.85rem;
+            margin-top: 5px;
+        }
+
+        .focus-timeline-section {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .focus-timeline-section h3 {
+            font-size: 1.1rem;
+            color: var(--accent);
+            margin-bottom: 15px;
+        }
+
+        .focus-timeline {
+            position: relative;
+            height: 50px;
+            background: var(--surface-2);
+            border-radius: 4px;
+            margin-bottom: 10px;
+            overflow: hidden;
+        }
+
+        .timeline-block {
+            position: absolute;
+            top: 0;
+            height: 100%;
+            opacity: 0.85;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .timeline-block:hover {
+            opacity: 1;
+        }
+
+        .timeline-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 10px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.85rem;
+            color: var(--text);
+        }
+
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+        }
+
+        .windows-section {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .windows-section h3 {
+            font-size: 1.1rem;
+            color: var(--accent);
+            margin-bottom: 15px;
+        }
+
+        .windows-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .windows-table th,
+        .windows-table td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--surface-2);
+        }
+
+        .windows-table th {
+            color: var(--muted);
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+
+        .windows-table tbody tr:hover {
+            background: var(--surface-2);
+        }
+
+        .window-title {
+            color: var(--muted);
+            font-size: 0.9rem;
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .deep-work-section {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .deep-work-section h3 {
+            font-size: 1.1rem;
+            color: var(--accent);
+            margin-bottom: 15px;
+        }
+
+        .deep-work-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .deep-work-list li {
+            padding: 12px;
+            background: var(--surface-2);
+            border-radius: 6px;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .deep-work-list li:last-child {
+            margin-bottom: 0;
+        }
+
+        .deep-work-list .duration {
+            font-weight: bold;
+            color: var(--accent);
+            min-width: 60px;
+        }
+
+        .deep-work-list .app {
+            font-weight: 500;
+            color: var(--text);
+        }
+
+        .deep-work-list .title {
+            color: var(--muted);
+            font-size: 0.9rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .no-data {
+            color: var(--muted);
+            font-style: italic;
+            text-align: center;
+            padding: 20px;
+        }
     </style>
 </head>
 <body>
@@ -641,6 +861,74 @@
                 <div class="chart-container tall">
                     <canvas id="trendChart"></canvas>
                 </div>
+            </div>
+        </div>
+
+        <!-- Focus Analytics Section -->
+        <h2 class="section-header">Focus Tracking Analytics</h2>
+
+        <!-- Focus Metrics Cards -->
+        <div class="focus-metrics" id="focusMetrics">
+            <div class="metrics-row">
+                <div class="metric-card">
+                    <div class="metric-value" id="trackedTimeValue">-</div>
+                    <div class="metric-label">Tracked Time</div>
+                    <div class="metric-hint">Active focus time today</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value" id="contextSwitchesValue">-</div>
+                    <div class="metric-label">Context Switches</div>
+                    <div class="metric-hint">App changes today</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value" id="longestFocusValue">-</div>
+                    <div class="metric-label">Longest Focus</div>
+                    <div class="metric-hint" id="longestFocusApp">-</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value" id="uniqueAppsValue">-</div>
+                    <div class="metric-label">Apps Used</div>
+                    <div class="metric-hint">Unique applications</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Focus Timeline -->
+        <div class="focus-timeline-section">
+            <h3>Today's Focus Timeline</h3>
+            <div class="focus-timeline" id="focusTimeline">
+                <div class="no-data">Loading...</div>
+            </div>
+            <div class="timeline-legend" id="timelineLegend"></div>
+        </div>
+
+        <!-- Two-column layout for windows and deep work -->
+        <div class="chart-row">
+            <!-- Top Windows -->
+            <div class="windows-section">
+                <h3>Top Windows (by Time)</h3>
+                <div style="max-height: 400px; overflow-y: auto;">
+                    <table class="windows-table">
+                        <thead>
+                            <tr>
+                                <th>App</th>
+                                <th>Window Title</th>
+                                <th style="text-align: right;">Duration</th>
+                            </tr>
+                        </thead>
+                        <tbody id="windowsTableBody">
+                            <tr><td colspan="3" class="no-data">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Deep Work Sessions -->
+            <div class="deep-work-section">
+                <h3>Deep Work Sessions (10+ min)</h3>
+                <ul class="deep-work-list" id="deepWorkList">
+                    <li><span class="no-data">Loading...</span></li>
+                </ul>
             </div>
         </div>
     </div>
@@ -781,6 +1069,7 @@
                 renderHourlyHeatmap();
                 renderAppTable();
                 renderTrendChart();
+                loadFocusAnalytics();
 
             } catch (error) {
                 console.error('Failed to load analytics data:', error);
@@ -1324,6 +1613,175 @@
                 console.error('Failed to load recent activity:', error);
                 container.innerHTML = '<li class="no-summaries">Failed to load summaries</li>';
             }
+        }
+
+        // Focus Analytics Functions
+        async function loadFocusAnalytics() {
+            const today = formatDate(new Date());
+            try {
+                const response = await fetch(`/api/analytics/focus/${today}`);
+                const data = await response.json();
+
+                if (data.error) {
+                    console.error('Focus analytics error:', data.error);
+                    renderFocusNoData();
+                    return;
+                }
+
+                state.data.focus = data;
+                renderFocusMetrics(data);
+                renderFocusTimeline(data);
+                renderWindowsTable(data.windows);
+                renderDeepWorkSessions(data.metrics.longest_focus_sessions);
+
+            } catch (error) {
+                console.error('Failed to load focus analytics:', error);
+                renderFocusNoData();
+            }
+        }
+
+        function renderFocusNoData() {
+            document.getElementById('trackedTimeValue').textContent = '0m';
+            document.getElementById('contextSwitchesValue').textContent = '0';
+            document.getElementById('longestFocusValue').textContent = '0m';
+            document.getElementById('longestFocusApp').textContent = '-';
+            document.getElementById('uniqueAppsValue').textContent = '0';
+            document.getElementById('focusTimeline').innerHTML = '<div class="no-data">No focus data for today</div>';
+            document.getElementById('timelineLegend').innerHTML = '';
+            document.getElementById('windowsTableBody').innerHTML = '<tr><td colspan="3" class="no-data">No data</td></tr>';
+            document.getElementById('deepWorkList').innerHTML = '<li><span class="no-data">No deep work sessions today</span></li>';
+        }
+
+        function formatDuration(seconds) {
+            if (!seconds || seconds < 0) return '0m';
+            const hours = Math.floor(seconds / 3600);
+            const mins = Math.floor((seconds % 3600) / 60);
+            if (hours > 0) {
+                return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+            }
+            return `${mins}m`;
+        }
+
+        function renderFocusMetrics(data) {
+            const totalSeconds = data.metrics.total_tracked_seconds || 0;
+            document.getElementById('trackedTimeValue').textContent = formatDuration(totalSeconds);
+            document.getElementById('contextSwitchesValue').textContent = data.metrics.context_switches || 0;
+            document.getElementById('uniqueAppsValue').textContent = data.metrics.unique_apps || 0;
+
+            const longestSessions = data.metrics.longest_focus_sessions || [];
+            if (longestSessions.length > 0) {
+                const longest = longestSessions[0];
+                const durationSecs = longest.duration_seconds || 0;
+                document.getElementById('longestFocusValue').textContent = formatDuration(durationSecs);
+                document.getElementById('longestFocusApp').textContent = longest.app_name || '-';
+            } else {
+                document.getElementById('longestFocusValue').textContent = '0m';
+                document.getElementById('longestFocusApp').textContent = '-';
+            }
+        }
+
+        function renderFocusTimeline(data) {
+            const container = document.getElementById('focusTimeline');
+            const legendContainer = document.getElementById('timelineLegend');
+
+            const apps = data.apps || [];
+            if (apps.length === 0) {
+                container.innerHTML = '<div class="no-data">No focus data for today</div>';
+                legendContainer.innerHTML = '';
+                return;
+            }
+
+            // Colors for apps (cycling through a palette)
+            const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const colors = isDark ? [
+                '#58a6ff', '#f85149', '#3fb950', '#d29922', '#a371f7',
+                '#ff7b72', '#79c0ff', '#ffa657', '#56d364', '#bc8cff'
+            ] : [
+                '#0969da', '#cf222e', '#1a7f37', '#9a6700', '#8250df',
+                '#d1242f', '#0550ae', '#c77706', '#116329', '#622cbc'
+            ];
+
+            const appColorMap = {};
+            apps.forEach((app, index) => {
+                appColorMap[app.app_name] = colors[index % colors.length];
+            });
+
+            // Calculate total for percentages
+            const totalSeconds = apps.reduce((sum, a) => sum + (a.total_seconds || 0), 0);
+            if (totalSeconds === 0) {
+                container.innerHTML = '<div class="no-data">No focus data for today</div>';
+                legendContainer.innerHTML = '';
+                return;
+            }
+
+            // Build timeline blocks
+            let blocksHtml = '';
+            let currentOffset = 0;
+            apps.forEach(app => {
+                const widthPct = ((app.total_seconds || 0) / totalSeconds) * 100;
+                if (widthPct > 0.5) { // Only show blocks > 0.5%
+                    const color = appColorMap[app.app_name];
+                    blocksHtml += `<div class="timeline-block" style="left: ${currentOffset}%; width: ${widthPct}%; background: ${color};" title="${app.app_name}: ${formatDuration(app.total_seconds)}"></div>`;
+                    currentOffset += widthPct;
+                }
+            });
+
+            container.innerHTML = blocksHtml || '<div class="no-data">No focus data for today</div>';
+
+            // Build legend
+            const topApps = apps.slice(0, 6);
+            legendContainer.innerHTML = topApps.map(app => `
+                <div class="legend-item">
+                    <div class="legend-color" style="background: ${appColorMap[app.app_name]}"></div>
+                    <span>${app.app_name} (${formatDuration(app.total_seconds)})</span>
+                </div>
+            `).join('');
+        }
+
+        function renderWindowsTable(windows) {
+            const tbody = document.getElementById('windowsTableBody');
+
+            if (!windows || windows.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" class="no-data">No window data</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = windows.slice(0, 15).map(w => `
+                <tr>
+                    <td><span class="app-name">${escapeHtml(w.app_name || 'Unknown')}</span></td>
+                    <td><span class="window-title" title="${escapeHtml(w.window_title || '')}">${escapeHtml(truncate(w.window_title, 50))}</span></td>
+                    <td style="text-align: right;">${formatDuration(w.total_seconds)}</td>
+                </tr>
+            `).join('');
+        }
+
+        function renderDeepWorkSessions(sessions) {
+            const container = document.getElementById('deepWorkList');
+
+            if (!sessions || sessions.length === 0) {
+                container.innerHTML = '<li><span class="no-data">No deep work sessions today (10+ min focused)</span></li>';
+                return;
+            }
+
+            container.innerHTML = sessions.slice(0, 8).map(s => `
+                <li>
+                    <span class="duration">${formatDuration(s.duration_seconds)}</span>
+                    <span class="app">${escapeHtml(s.app_name || 'Unknown')}</span>
+                    <span class="title" title="${escapeHtml(s.window_title || '')}">${escapeHtml(truncate(s.window_title, 40))}</span>
+                </li>
+            `).join('');
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function truncate(text, maxLen) {
+            if (!text) return '';
+            return text.length > maxLen ? text.substring(0, maxLen) + '...' : text;
         }
     </script>
 </body>

@@ -68,6 +68,7 @@ from .sessions import SessionManager
 from .monitors import get_monitors, get_monitor_for_window, get_primary_monitor
 from .config import get_config_manager
 from .summarizer_worker import SummarizerWorker
+from .window_watcher import WindowWatcher, WindowFocusEvent
 
 
 class ActivityDaemon:
@@ -148,6 +149,14 @@ class ActivityDaemon:
         if self.config.config.summarization.enabled:
             self.summarizer_worker.start()
 
+        # Window focus tracking
+        self.window_watcher = WindowWatcher(
+            poll_interval=1.0,
+            on_focus_change=self._handle_focus_change,
+            min_duration_seconds=self.config.config.tracking.min_focus_duration
+        )
+        self.last_capture_time = datetime.now()
+
         if enable_web:
             self._setup_flask_app()
 
@@ -220,6 +229,25 @@ class ActivityDaemon:
             if session:  # Was long enough
                 self.log(f"Ended session {self.current_session_id}, duration: {session.get('duration_seconds', 0) // 60}m")
             self.current_session_id = None
+
+    def _handle_focus_change(self, old_window: WindowFocusEvent, new_window: WindowFocusEvent):
+        """Called when window focus changes - save completed focus event.
+
+        Args:
+            old_window: The window that lost focus (with end_time set)
+            new_window: The window that gained focus
+        """
+        self.storage.save_focus_event(
+            window_title=old_window.window_title,
+            app_name=old_window.app_name,
+            window_class=old_window.window_class,
+            start_time=old_window.start_time,
+            end_time=old_window.end_time,
+            session_id=self.current_session_id
+        )
+        self.log(
+            f"Focus: {old_window.app_name} ({old_window.duration_seconds:.1f}s) -> {new_window.app_name}"
+        )
 
     def _summarize_session(self, session: dict):
         """Background summarization of completed session.
@@ -598,6 +626,73 @@ class ActivityDaemon:
         # Count set bits (Hamming distance)
         return bin(xor_result).count('1')
     
+    def _should_capture(self) -> tuple[bool, str]:
+        """Determine if we should capture now based on focus stability.
+
+        Uses focus-aware capture logic:
+        - Skip if no window is focused (unless max interval exceeded)
+        - Skip transient windows (notifications, popups)
+        - Wait for stable focus before capturing
+        - Force capture after max interval to avoid missing activity
+
+        Returns:
+            tuple[bool, str]: (should_capture, reason)
+                Reasons: 'stable_focus', 'max_interval_exceeded', 'no_window_fallback',
+                        'no_window', 'transient_window', 'focus_unstable', 'interval_not_reached'
+        """
+        now = datetime.now()
+        time_since_last = (now - self.last_capture_time).total_seconds()
+        interval = self.config.config.capture.interval_seconds
+        stability_threshold = self.config.config.capture.stability_threshold_seconds
+        max_multiplier = self.config.config.capture.max_interval_multiplier
+
+        current_window = self.window_watcher.get_current_window()
+
+        # No window focused (screen locked, desktop, etc.)
+        if not current_window:
+            if time_since_last >= interval:
+                return True, "no_window_fallback"
+            return False, "no_window"
+
+        focus_duration = current_window.duration_seconds
+
+        # Skip transient windows (notifications, popups)
+        if self.config.config.capture.skip_transient_windows:
+            if self._is_transient_window(current_window):
+                return False, "transient_window"
+
+        # Force capture if we've waited too long (don't miss activity during rapid switching)
+        max_wait = interval * max_multiplier
+        if time_since_last >= max_wait:
+            return True, "max_interval_exceeded"
+
+        # Normal capture: interval passed AND focus is stable
+        if time_since_last >= interval:
+            if focus_duration >= stability_threshold:
+                return True, "stable_focus"
+            else:
+                return False, "focus_unstable"
+
+        return False, "interval_not_reached"
+
+    def _is_transient_window(self, window: WindowFocusEvent) -> bool:
+        """Check if window is transient (notification, popup, etc.).
+
+        Args:
+            window: The window to check
+
+        Returns:
+            bool: True if the window matches a transient pattern
+        """
+        window_class_lower = (window.window_class or '').lower()
+        title_lower = window.window_title.lower()
+
+        for pattern in self.config.config.tracking.transient_window_classes:
+            pattern_lower = pattern.lower()
+            if pattern_lower in window_class_lower or pattern_lower in title_lower:
+                return True
+        return False
+
     def _should_skip_screenshot(self, current_dhash: str) -> bool:
         """Determine if current screenshot should be skipped due to similarity.
         
@@ -659,6 +754,9 @@ class ActivityDaemon:
         # Start AFK watcher
         self.afk_watcher.start()
 
+        # Start window watcher for focus tracking
+        self.window_watcher.start()
+
         # Check for active session from database (e.g., after restart)
         active_session = self.storage.get_active_session()
         if active_session:
@@ -707,7 +805,19 @@ class ActivityDaemon:
 
         while self.running:
             try:
-                # Get window information first (needed for monitor detection)
+                # Focus-aware capture: check if we should capture now
+                should_capture, capture_reason = self._should_capture()
+
+                if not should_capture:
+                    # Not time to capture yet - short sleep for responsive checks
+                    time.sleep(1)
+                    continue
+
+                # Get focus context before capture
+                current_window = self.window_watcher.get_current_window()
+                focus_duration = current_window.duration_seconds if current_window else None
+
+                # Get window information (needed for monitor detection)
                 window_title, app_name = self._get_active_window_info()
                 window_geometry = self._get_focused_window_geometry()
 
@@ -733,8 +843,6 @@ class ActivityDaemon:
                     if window_geometry:
                         window_geometry['x'] -= active_monitor.x
                         window_geometry['y'] -= active_monitor.y
-
-                    self.log(f"Capturing monitor: {active_monitor.name} ({active_monitor.width}x{active_monitor.height})")
                 else:
                     # No focused window or couldn't determine monitor - use primary
                     primary_monitor = get_primary_monitor(monitors)
@@ -746,24 +854,24 @@ class ActivityDaemon:
                             'width': primary_monitor.width,
                             'height': primary_monitor.height
                         }
-                        self.log(f"No active window, using primary monitor: {primary_monitor.name}")
 
                 # Capture screenshot with monitor region
                 filepath, current_dhash = self.capture.capture_screen(region=capture_region)
                 if not filepath:
                     self.log("Failed to capture screenshot")
-                    time.sleep(30)
+                    time.sleep(1)
                     continue
 
-                # Check if we should skip this screenshot
+                # Check if we should skip this screenshot (duplicate detection)
                 if self._should_skip_screenshot(current_dhash):
                     self.log(f"Screenshot too similar to previous (distance < 3), skipping...")
-                    # TODO: Permission errors - handle case where file deletion fails due to permissions
                     try:
                         Path(filepath).unlink(missing_ok=True)
                     except PermissionError as e:
                         self.log(f"Warning: Could not delete duplicate screenshot {filepath}: {e}")
-                    time.sleep(30)
+                    # Still update capture time to avoid rapid retries
+                    self.last_capture_time = datetime.now()
+                    time.sleep(1)
                     continue
 
                 # Infer app_name from window_title if app_name is NULL
@@ -795,7 +903,11 @@ class ActivityDaemon:
                             self.log(f"New window in session: {window_title[:50]}")
 
                 self.last_dhash = current_dhash
-                self.log(f"Saved screenshot {screenshot_id}: {Path(filepath).name}")
+                self.last_capture_time = datetime.now()
+
+                # Log capture with focus context
+                focus_info = f", focus={focus_duration:.1f}s" if focus_duration else ""
+                self.log(f"Captured ({capture_reason}{focus_info}): {Path(filepath).name}")
 
                 # Check if threshold reached for summarization
                 self.summarizer_worker.check_and_queue()
@@ -805,17 +917,17 @@ class ActivityDaemon:
                 # Should implement exponential backoff and distinguish between recoverable/fatal errors
                 self.log(f"Error in capture loop: {e}")
 
-            # Sleep for 30 seconds
-            for _ in range(30):
-                if not self.running:
-                    break
-                time.sleep(1)
+            # Short sleep for responsive focus-aware capture
+            time.sleep(1)
 
         # Cleanup on shutdown
         self.log("Shutting down...")
 
         # Stop AFK watcher
         self.afk_watcher.stop()
+
+        # Stop window watcher
+        self.window_watcher.stop()
 
         # Stop summarizer worker
         self.summarizer_worker.stop()

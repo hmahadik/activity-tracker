@@ -204,6 +204,9 @@ class ScreenCapture:
                 except (PermissionError, OSError) as e:
                     raise ScreenCaptureError(f"Failed to save screenshot to {filepath}: {e}") from e
 
+                # Generate thumbnail
+                self._generate_thumbnail(img, filename, now)
+
                 logger.info(f"Screenshot saved: {filepath}")
                 return str(filepath), dhash
 
@@ -333,3 +336,52 @@ class ScreenCapture:
             - 20+: Completely different images
         """
         return self.compare_hashes(hash1, hash2) <= threshold
+
+    def _generate_thumbnail(self, img: Image.Image, filename: str, timestamp) -> Optional[str]:
+        """Generate a thumbnail version of the screenshot.
+
+        Creates a smaller version of the image for faster loading in grid views.
+        Thumbnails are stored in a separate directory hierarchy mirroring the
+        original screenshots structure.
+
+        Args:
+            img (Image.Image): PIL Image object to create thumbnail from
+            filename (str): Base filename without extension
+            timestamp: datetime object for directory structure
+
+        Returns:
+            Optional[str]: Path to the saved thumbnail, or None if generation fails
+
+        Note:
+            Thumbnails are saved as WebP files at 200px width (maintaining aspect ratio)
+            with 75% quality for optimal size/quality balance.
+        """
+        try:
+            # Calculate thumbnail size (200px width, maintain aspect ratio)
+            thumb_width = 200
+            aspect_ratio = img.height / img.width
+            thumb_height = int(thumb_width * aspect_ratio)
+
+            # Resize image using high-quality resampling
+            thumbnail = img.resize((thumb_width, thumb_height), Image.Resampling.LANCZOS)
+
+            # Create thumbnail directory with same hierarchy as originals
+            thumb_base_dir = Path(self.output_dir).parent / "thumbnails"
+            thumb_date_dir = thumb_base_dir / f"{timestamp.year:04d}" / f"{timestamp.month:02d}" / f"{timestamp.day:02d}"
+
+            try:
+                thumb_date_dir.mkdir(parents=True, exist_ok=True)
+            except PermissionError as e:
+                logger.warning(f"Permission denied creating thumbnail directory {thumb_date_dir}: {e}")
+                return None
+
+            # Save thumbnail as WebP with lower quality for smaller file size
+            thumb_filepath = thumb_date_dir / f"{filename}.webp"
+            thumbnail.save(thumb_filepath, "WEBP", quality=75, method=4)
+
+            logger.debug(f"Thumbnail saved: {thumb_filepath}")
+            return str(thumb_filepath)
+
+        except Exception as e:
+            logger.warning(f"Failed to generate thumbnail: {e}")
+            return None

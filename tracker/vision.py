@@ -92,6 +92,14 @@ class HybridSummarizer:
         timeout: int = 120,
         ollama_host: str = None,
         max_samples: int = 10,
+        sample_interval_minutes: int = 10,
+        focus_weighted_sampling: bool = True,
+        # New content mode flags (multi-select)
+        include_focus_context: bool = True,
+        include_screenshots: bool = True,
+        include_ocr: bool = True,
+        # Legacy (backward compatibility)
+        summarization_mode: str = None,
     ):
         """
         Initialize the HybridSummarizer.
@@ -101,11 +109,29 @@ class HybridSummarizer:
             timeout: Timeout in seconds for LLM calls.
             ollama_host: Base URL for Ollama API. Defaults to http://localhost:11434.
             max_samples: Maximum screenshots to send to LLM (default 10).
+            sample_interval_minutes: Target interval between samples (default 10).
+            focus_weighted_sampling: Weight sampling by focus duration (default True).
+            include_focus_context: Include window titles and duration info (default True).
+            include_screenshots: Include screenshot images (default True).
+            include_ocr: Include OCR text extraction (default True).
+            summarization_mode: Deprecated - use include_* flags instead.
         """
         self.model = model
         self.timeout = timeout
         self.ollama_host = ollama_host or DEFAULT_OLLAMA_HOST
         self.max_samples = max_samples
+        self.sample_interval_minutes = sample_interval_minutes
+        self.focus_weighted_sampling = focus_weighted_sampling
+
+        # Handle legacy summarization_mode for backward compatibility
+        if summarization_mode:
+            self.include_screenshots = summarization_mode != "ocr_only"
+            self.include_ocr = summarization_mode != "screenshots_only"
+            self.include_focus_context = True  # Always include focus context in legacy mode
+        else:
+            self.include_focus_context = include_focus_context
+            self.include_screenshots = include_screenshots
+            self.include_ocr = include_ocr
 
     def _call_ollama_api(
         self,
@@ -230,17 +256,20 @@ class HybridSummarizer:
         screenshots: list[dict],
         ocr_texts: list[dict],
         previous_summary: str = None,
+        focus_events: list[dict] = None,
     ) -> tuple[str, int, str, list]:
         """
-        Summarize a session with context continuity.
+        Summarize a session with context continuity and focus tracking data.
 
         Takes screenshots from a session, OCR text from unique windows,
-        and optionally the previous session's summary for context.
+        optionally the previous session's summary for context, and focus
+        events for time-based activity breakdown.
 
         Args:
             screenshots: List of dicts with {id, filepath, window_title, timestamp}.
             ocr_texts: List of dicts with {window_title, ocr_text}.
             previous_summary: Optional previous session summary for continuity.
+            focus_events: Optional list of focus events from storage.get_focus_events_in_range().
 
         Returns:
             Tuple of (summary text, inference time in ms, prompt text, screenshot IDs used).
@@ -254,30 +283,39 @@ class HybridSummarizer:
 
         start_time = time.time()
 
-        # Sample screenshots uniformly
-        sampled = self._sample_screenshots(screenshots, self.max_samples)
-        logger.info(f"Sampled {len(sampled)} of {len(screenshots)} screenshots")
+        # Sample screenshots (focus-weighted if enabled and focus data available)
+        if self.focus_weighted_sampling and focus_events:
+            sampled = self._sample_screenshots_weighted(
+                screenshots, focus_events, self.max_samples, self.sample_interval_minutes
+            )
+            logger.info(f"Focus-weighted sampled {len(sampled)} of {len(screenshots)} screenshots")
+        else:
+            sampled = self._sample_screenshots_uniform(
+                screenshots, self.max_samples, self.sample_interval_minutes
+            )
+            logger.info(f"Uniformly sampled {len(sampled)} of {len(screenshots)} screenshots")
 
         # Extract IDs of screenshots actually used
         screenshot_ids_used = [s["id"] for s in sampled]
 
         # Prepare images for LLM (use cropped versions for better focus)
         images_base64 = []
-        for s in sampled:
-            try:
-                # Get cropped version (falls back to full if no geometry)
-                img_path = self._get_cropped_screenshot(s)
-                img_b64 = self._prepare_image(img_path)
-                images_base64.append(img_b64)
-            except Exception as e:
-                logger.warning(f"Failed to prepare image {s['filepath']}: {e}")
+        if self.include_screenshots:
+            for s in sampled:
+                try:
+                    # Get cropped version (falls back to full if no geometry)
+                    img_path = self._get_cropped_screenshot(s)
+                    img_b64 = self._prepare_image(img_path)
+                    images_base64.append(img_b64)
+                except Exception as e:
+                    logger.warning(f"Failed to prepare image {s['filepath']}: {e}")
 
-        if not images_base64:
-            raise RuntimeError("Failed to prepare any images for LLM")
+            if not images_base64:
+                logger.warning("Failed to prepare any images for LLM")
 
         # Format OCR texts
         ocr_section = ""
-        if ocr_texts:
+        if self.include_ocr and ocr_texts:
             ocr_lines = []
             for item in ocr_texts:
                 title = item.get("window_title", "Unknown")
@@ -289,61 +327,222 @@ class HybridSummarizer:
             if ocr_lines:
                 ocr_section = "\n".join(ocr_lines)
 
+        # Ensure we have something to send
+        if not images_base64 and not ocr_section:
+            raise RuntimeError("No content to send to LLM (no images or OCR text)")
+
+        # Build focus context from events (if enabled)
+        focus_context = ""
+        if self.include_focus_context and focus_events:
+            focus_context = self._build_focus_context(focus_events)
+
         # Build prompt
         prompt_parts = [
-            "You are summarizing a developer's work session.",
+            "You are summarizing a developer's work activity.",
             "",
         ]
 
         if previous_summary:
-            prompt_parts.append(f"Previous session context: {previous_summary}")
+            prompt_parts.append(f"Previous context: {previous_summary}")
+            prompt_parts.append("")
+
+        if focus_context:
+            prompt_parts.append("## Time Breakdown (from focus tracking)")
+            prompt_parts.append(focus_context)
             prompt_parts.append("")
 
         if ocr_section:
-            prompt_parts.append("Window titles and OCR text from this session:")
+            prompt_parts.append("## Window Content (OCR)")
             prompt_parts.append(ocr_section)
             prompt_parts.append("")
 
+        if images_base64:
+            prompt_parts.append(f"## Screenshots")
+            prompt_parts.append(f"{len(images_base64)} screenshots attached showing actual screen content.")
+            prompt_parts.append("")
+
+        # Adjust guidance based on what content is available
+        if images_base64 and ocr_section:
+            basis = "the time breakdown, OCR text, and screenshots"
+        elif images_base64:
+            basis = "the time breakdown and screenshots"
+        else:
+            basis = "the time breakdown and OCR text"
+
         prompt_parts.extend([
-            "Based on the screenshots and text above, write ONE sentence (max 20 words) describing the main activity.",
-            'Format: "[Action verb] [what] in/for [project/context]"',
-            "Examples:",
-            '- "Debugging portal permissions in activity-tracker service"',
-            '- "Building dataset with 1000 images for object detection"',
-            '- "Implementing hybrid mode for virtual device simulation"',
-            '- "Reviewing pull request for authentication changes"',
+            f"Based on {basis}, write ONE sentence (max 25 words) describing the PRIMARY activity.",
             "",
-            "Be specific. Use actual filenames, project names, and technical terms visible in the screenshots.",
+            "IMPORTANT: Output ONLY the summary sentence. No explanation, no reasoning, no preamble.",
+            "",
+            "Guidelines:",
+            "- Focus on where the most time was spent",
+            "- Use specific project names, filenames, or URLs visible in the content",
+            '- Format: "[Action verb] [what] in/for [project/context]"',
+            "- If multiple distinct activities, mention the dominant one",
+            "- Do NOT assume different apps/windows are related unless clearly the same project",
+            "",
+            "Good examples (output exactly like this):",
+            "Implementing window focus tracking in activity-tracker daemon.py (45 min)",
+            "Reviewing PR #1234 for authentication service and responding to comments",
+            "Debugging API endpoint issues in Acusight backend with Docker logs",
+            "",
+            'Be specific. Avoid generic descriptions like "coding" or "browsing".',
+            "",
+            "Your response (just the summary, nothing else):",
         ])
 
         prompt = "\n".join(prompt_parts)
 
         # Build full API request info for debugging
+        content_mode = []
+        if self.include_focus_context:
+            content_mode.append("focus_context")
+        if self.include_screenshots:
+            content_mode.append("screenshots")
+        if self.include_ocr:
+            content_mode.append("ocr")
+
         api_request_info = (
             f"Model: {self.model}\n"
+            f"Content: {', '.join(content_mode)}\n"
             f"Images: {len(images_base64)} base64-encoded JPEG images (max 1024px)\n"
             f"Endpoint: {self.ollama_host}/api/chat\n\n"
             f"Prompt:\n{prompt}"
         )
 
-        # Call LLM
-        response = self._call_ollama_api(prompt, images_base64)
+        # Call LLM (pass images only if we have them)
+        response = self._call_ollama_api(prompt, images_base64 if images_base64 else None)
 
         inference_ms = int((time.time() - start_time) * 1000)
         return response.strip(), inference_ms, api_request_info, screenshot_ids_used
 
-    def _sample_screenshots(
-        self, screenshots: list[dict], max_n: int
+    def _build_focus_context(self, focus_events: list[dict]) -> str:
+        """
+        Build human-readable focus context from events.
+
+        Aggregates focus events by app and window, showing time spent
+        and context switches to help the LLM understand work patterns.
+
+        Example output:
+            - VS Code (tracker/daemon.py): 45m 23s [longest: 18m]
+            - Firefox (GitHub PR #1234): 12m 5s [3 visits]
+            - Slack: 3m 12s [8 visits]
+            Total: 63m, 14 context switches
+
+        Args:
+            focus_events: List of focus event dicts from storage.
+
+        Returns:
+            Formatted string describing focus activity.
+        """
+        if not focus_events:
+            return "No focus data available."
+
+        # Aggregate by app + window
+        aggregated = {}
+        for event in focus_events:
+            title = self._truncate_title(event.get('window_title', ''))
+            key = (event.get('app_name', 'Unknown'), title)
+            if key not in aggregated:
+                aggregated[key] = {
+                    'total_seconds': 0,
+                    'visit_count': 0,
+                    'longest_session': 0
+                }
+            duration = event.get('duration_seconds', 0) or 0
+            aggregated[key]['total_seconds'] += duration
+            aggregated[key]['visit_count'] += 1
+            aggregated[key]['longest_session'] = max(
+                aggregated[key]['longest_session'],
+                duration
+            )
+
+        # Sort by total time
+        sorted_items = sorted(
+            aggregated.items(),
+            key=lambda x: -x[1]['total_seconds']
+        )
+
+        lines = []
+        for (app, title), stats in sorted_items[:8]:  # Top 8
+            duration_str = self._format_duration(stats['total_seconds'])
+
+            extra = []
+            if stats['longest_session'] >= 300:  # 5+ min focus worth noting
+                extra.append(f"longest: {self._format_duration(stats['longest_session'])}")
+            if stats['visit_count'] > 1:
+                extra.append(f"{stats['visit_count']} visits")
+
+            extra_str = f" [{', '.join(extra)}]" if extra else ""
+
+            if title and title != app:
+                lines.append(f"- {app} ({title}): {duration_str}{extra_str}")
+            else:
+                lines.append(f"- {app}: {duration_str}{extra_str}")
+
+        # Summary stats
+        total_seconds = sum(e.get('duration_seconds', 0) or 0 for e in focus_events)
+        context_switches = self._count_context_switches(focus_events)
+
+        lines.append(f"\nTotal tracked: {self._format_duration(total_seconds)}, {context_switches} context switches")
+
+        return '\n'.join(lines)
+
+    def _truncate_title(self, title: str, max_len: int = 50) -> str:
+        """Truncate and clean window title for display."""
+        if not title:
+            return ""
+        # Remove common browser/editor suffixes
+        for suffix in [' - Google Chrome', ' - Mozilla Firefox', ' - Visual Studio Code',
+                       ' — Mozilla Firefox', ' - Chromium', ' - Code - OSS']:
+            title = title.replace(suffix, '')
+
+        if len(title) > max_len:
+            return title[:max_len-3] + '...'
+        return title
+
+    def _format_duration(self, seconds: float) -> str:
+        """Format seconds as human readable duration."""
+        if not seconds:
+            return "0s"
+        seconds = float(seconds)
+        if seconds < 60:
+            return f"{int(seconds)}s"
+        elif seconds < 3600:
+            mins = int(seconds // 60)
+            secs = int(seconds % 60)
+            return f"{mins}m {secs}s" if secs else f"{mins}m"
+        else:
+            hours = int(seconds // 3600)
+            mins = int((seconds % 3600) // 60)
+            return f"{hours}h {mins}m"
+
+    def _count_context_switches(self, events: list[dict]) -> int:
+        """Count app switches in event list."""
+        if len(events) < 2:
+            return 0
+        sorted_events = sorted(events, key=lambda x: x.get('start_time', ''))
+        return sum(
+            1 for i in range(1, len(sorted_events))
+            if sorted_events[i].get('app_name') != sorted_events[i-1].get('app_name')
+        )
+
+    def _sample_screenshots_uniform(
+        self,
+        screenshots: list[dict],
+        max_n: int,
+        interval_minutes: int = 10
     ) -> list[dict]:
         """
         Uniformly sample screenshots across a session's time range.
 
         Selects screenshots evenly distributed across the session duration,
-        targeting approximately 1 screenshot per 10 minutes.
+        targeting approximately 1 screenshot per interval_minutes.
 
         Args:
             screenshots: List of screenshot dicts with timestamp field.
             max_n: Maximum number of screenshots to return.
+            interval_minutes: Target interval between samples.
 
         Returns:
             List of selected screenshot dicts.
@@ -351,11 +550,11 @@ class HybridSummarizer:
         if len(screenshots) <= max_n:
             return screenshots
 
-        # Calculate ideal sample count (~1 per 10 min)
+        # Calculate ideal sample count based on interval
         if screenshots:
             timestamps = [s.get("timestamp", 0) for s in screenshots]
             duration_minutes = (max(timestamps) - min(timestamps)) / 60
-            ideal_samples = max(1, int(duration_minutes / 10))
+            ideal_samples = max(1, int(duration_minutes / interval_minutes))
             target_count = min(ideal_samples, max_n)
         else:
             target_count = max_n
@@ -365,6 +564,114 @@ class HybridSummarizer:
         indices = [int(i * step) for i in range(target_count)]
 
         return [screenshots[i] for i in indices]
+
+    def _sample_screenshots_weighted(
+        self,
+        screenshots: list[dict],
+        focus_events: list[dict],
+        max_n: int,
+        interval_minutes: int = 10
+    ) -> list[dict]:
+        """
+        Sample screenshots weighted by focus duration per app/window.
+
+        Screenshots from apps with more focus time get proportionally more
+        representation in the sample. This ensures the LLM sees screenshots
+        that reflect actual work patterns (e.g., 80% terminal time = ~80%
+        terminal screenshots).
+
+        Args:
+            screenshots: List of screenshot dicts with app_name field.
+            focus_events: List of focus event dicts with app_name and duration.
+            max_n: Maximum number of screenshots to return.
+            interval_minutes: Target interval between samples.
+
+        Returns:
+            List of selected screenshot dicts weighted by focus time.
+        """
+        if len(screenshots) <= max_n:
+            return screenshots
+
+        if not focus_events:
+            return self._sample_screenshots_uniform(screenshots, max_n, interval_minutes)
+
+        # Calculate ideal sample count based on interval
+        timestamps = [s.get("timestamp", 0) for s in screenshots]
+        duration_minutes = (max(timestamps) - min(timestamps)) / 60 if timestamps else 0
+        ideal_samples = max(1, int(duration_minutes / interval_minutes))
+        target_count = min(ideal_samples, max_n, len(screenshots))
+
+        if target_count >= len(screenshots):
+            return screenshots
+
+        # Calculate total focus time per app
+        app_focus_time = {}
+        for event in focus_events:
+            app = event.get('app_name', 'unknown') or 'unknown'
+            duration = event.get('duration_seconds', 0) or 0
+            app_focus_time[app] = app_focus_time.get(app, 0) + duration
+
+        total_focus_time = sum(app_focus_time.values())
+        if total_focus_time == 0:
+            return self._sample_screenshots_uniform(screenshots, max_n, interval_minutes)
+
+        # Group screenshots by app
+        app_screenshots = {}
+        for ss in screenshots:
+            app = ss.get('app_name', 'unknown') or 'unknown'
+            if app not in app_screenshots:
+                app_screenshots[app] = []
+            app_screenshots[app].append(ss)
+
+        # Allocate samples per app based on focus time proportion
+        sampled = []
+        remaining_quota = target_count
+
+        # Sort apps by focus time (most time first)
+        sorted_apps = sorted(app_focus_time.keys(), key=lambda a: -app_focus_time.get(a, 0))
+
+        for app in sorted_apps:
+            if remaining_quota <= 0:
+                break
+
+            app_ss = app_screenshots.get(app, [])
+            if not app_ss:
+                continue
+
+            # Calculate quota for this app based on focus proportion
+            focus_ratio = app_focus_time.get(app, 0) / total_focus_time
+            app_quota = max(1, int(target_count * focus_ratio))
+            app_quota = min(app_quota, remaining_quota, len(app_ss))
+
+            # Uniformly sample within this app's screenshots
+            if len(app_ss) <= app_quota:
+                sampled.extend(app_ss)
+            else:
+                step = len(app_ss) / app_quota
+                indices = [int(i * step) for i in range(app_quota)]
+                sampled.extend([app_ss[i] for i in indices])
+
+            remaining_quota -= len(sampled) - (target_count - remaining_quota)
+
+        # If we still have quota, fill from apps without focus data
+        if len(sampled) < target_count:
+            apps_with_focus = set(app_focus_time.keys())
+            for app, app_ss in app_screenshots.items():
+                if app in apps_with_focus:
+                    continue
+                for ss in app_ss:
+                    if ss not in sampled and len(sampled) < target_count:
+                        sampled.append(ss)
+
+        # Sort by timestamp to maintain chronological order
+        sampled.sort(key=lambda s: s.get('timestamp', 0))
+
+        logger.debug(
+            f"Focus-weighted sampling: {len(sampled)} screenshots from "
+            f"{len(set(s.get('app_name') for s in sampled))} apps"
+        )
+
+        return sampled
 
     def extract_ocr(self, image_path: str) -> str:
         """

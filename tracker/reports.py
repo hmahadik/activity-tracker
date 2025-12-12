@@ -9,6 +9,11 @@ Report types supported:
 - Detailed: Day-by-day breakdown
 - Standup: Brief bullet points for standup meetings
 
+Project-aware reporting:
+- Reports respect project boundaries to avoid conflating unrelated work
+- Each project gets its own section in the report
+- Executive summary explicitly separates projects
+
 Example:
     >>> from tracker.reports import ReportGenerator
     >>> generator = ReportGenerator(storage, summarizer, config)
@@ -18,11 +23,12 @@ Example:
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import List, Optional, TYPE_CHECKING
+from typing import List, Dict, Optional, TYPE_CHECKING
 import json
 import logging
 
 from .timeparser import TimeParser
+from .project_detector import ProjectDetector
 
 if TYPE_CHECKING:
     from .storage import ActivityStorage
@@ -122,13 +128,15 @@ class ReportGenerator:
         self.summarizer = summarizer
         self.config = config
         self.time_parser = TimeParser()
+        self.project_detector = ProjectDetector()
 
     def generate(
         self,
         time_range: str,
         report_type: str = "summary",
         include_screenshots: bool = True,
-        max_screenshots: int = 10
+        max_screenshots: int = 10,
+        separate_projects: bool = True
     ) -> Report:
         """Generate a report for the given time range.
 
@@ -137,6 +145,7 @@ class ReportGenerator:
             report_type: Type of report - "summary", "detailed", or "standup".
             include_screenshots: Whether to include key screenshots.
             max_screenshots: Maximum number of screenshots to include.
+            separate_projects: Whether to group summaries by project.
 
         Returns:
             Report object with all data populated.
@@ -152,12 +161,13 @@ class ReportGenerator:
 
         # Gather data
         summaries = self.storage.get_summaries_in_range(start, end)
+        summaries_by_project = self.storage.get_summaries_by_project(start, end) if separate_projects else {}
         screenshots = self.storage.get_screenshots_in_range(start, end)
         sessions = self.storage.get_sessions_in_range(start, end)
 
         logger.debug(
-            f"Found {len(summaries)} summaries, {len(screenshots)} screenshots, "
-            f"{len(sessions)} sessions"
+            f"Found {len(summaries)} summaries ({len(summaries_by_project)} projects), "
+            f"{len(screenshots)} screenshots, {len(sessions)} sessions"
         )
 
         # Compute analytics
@@ -172,11 +182,11 @@ class ReportGenerator:
 
         # Generate report content based on type
         if report_type == "standup":
-            report = self._generate_standup(summaries, analytics, range_description)
+            report = self._generate_standup(summaries, analytics, range_description, summaries_by_project)
         elif report_type == "detailed":
-            report = self._generate_detailed(summaries, analytics, range_description, start, end)
+            report = self._generate_detailed(summaries, analytics, range_description, start, end, summaries_by_project)
         else:
-            report = self._generate_summary(summaries, analytics, range_description)
+            report = self._generate_summary(summaries, analytics, range_description, summaries_by_project)
 
         report.key_screenshots = key_screenshots
         report.raw_summaries = summaries
@@ -366,7 +376,8 @@ class ReportGenerator:
         self,
         summaries: List[dict],
         analytics: ReportAnalytics,
-        range_description: str
+        range_description: str,
+        summaries_by_project: Dict[str, List[dict]] = None
     ) -> Report:
         """Generate high-level summary report.
 
@@ -374,6 +385,7 @@ class ReportGenerator:
             summaries: Existing summaries to synthesize.
             analytics: Computed analytics.
             range_description: Human-readable time range.
+            summaries_by_project: Summaries grouped by project.
 
         Returns:
             Report with executive summary and sections.
@@ -390,12 +402,19 @@ class ReportGenerator:
                 raw_summaries=[]
             )
 
-        # Extract summary texts
-        summary_texts = [s['summary'] for s in summaries if s.get('summary')]
+        # Use project-aware sections if available
+        if summaries_by_project and len(summaries_by_project) > 1:
+            sections = self._generate_project_sections(summaries_by_project)
+            executive_summary = self._generate_project_aware_executive_summary(
+                summaries_by_project, analytics, range_description
+            )
+        else:
+            # Fallback to theme-based grouping
+            summary_texts = [s['summary'] for s in summaries if s.get('summary')]
 
-        # Generate executive summary using LLM
-        if self.summarizer and self.summarizer.is_available():
-            prompt = f"""Synthesize these activity summaries into a coherent executive summary.
+            # Generate executive summary using LLM
+            if self.summarizer and self.summarizer.is_available():
+                prompt = f"""Synthesize these activity summaries into a coherent executive summary.
 Time period: {range_description}
 Total active time: {analytics.total_active_minutes} minutes
 Top applications: {', '.join(a['name'] for a in analytics.top_apps[:5])}
@@ -410,13 +429,11 @@ Write a 2-3 paragraph executive summary covering:
 
 Be specific and use actual project names and technical terms from the summaries."""
 
-            executive_summary = self.summarizer.generate_text(prompt)
-        else:
-            # Fallback if summarizer unavailable
-            executive_summary = self._fallback_executive_summary(summary_texts, analytics)
+                executive_summary = self.summarizer.generate_text(prompt)
+            else:
+                executive_summary = self._fallback_executive_summary(summary_texts, analytics)
 
-        # Group summaries by theme for sections
-        sections = self._group_into_sections(summaries)
+            sections = self._group_into_sections(summaries)
 
         return Report(
             title=f"Activity Report: {range_description}",
@@ -429,13 +446,149 @@ Be specific and use actual project names and technical terms from the summaries.
             raw_summaries=summaries
         )
 
+    def _generate_project_sections(
+        self,
+        summaries_by_project: Dict[str, List[dict]]
+    ) -> List[ReportSection]:
+        """Generate a section for each distinct project.
+
+        Args:
+            summaries_by_project: Dict mapping project -> list of summaries.
+
+        Returns:
+            List of ReportSection, one per project.
+        """
+        sections = []
+
+        # Skip non-work contexts
+        skip_contexts = {'browsing', 'communication', 'music', 'media', 'unknown'}
+
+        # Sort projects by total time spent (most time first)
+        project_times = {}
+        for project, project_summaries in summaries_by_project.items():
+            total_time = sum(
+                self._summary_duration_seconds(s)
+                for s in project_summaries
+            )
+            project_times[project] = total_time
+
+        sorted_projects = sorted(project_times.keys(), key=lambda p: -project_times[p])
+
+        for project in sorted_projects:
+            if project.lower() in skip_contexts:
+                continue
+
+            project_summaries = summaries_by_project[project]
+            summary_texts = [s['summary'] for s in project_summaries if s.get('summary')]
+
+            if not summary_texts:
+                continue
+
+            # Synthesize project summary
+            if self.summarizer and self.summarizer.is_available():
+                project_content = self.summarizer.generate_text(f"""
+Summarize these activities for the "{project}" project in 2-3 sentences.
+Focus on what was accomplished, not just what was done.
+
+Activities:
+{chr(10).join(f"- {s}" for s in summary_texts)}
+
+Be specific and technical. This is for a developer's activity report.""")
+            else:
+                project_content = " ".join(summary_texts[:3])
+
+            sections.append(ReportSection(
+                title=f"Project: {project}",
+                content=project_content,
+                screenshots=[]
+            ))
+
+        return sections
+
+    def _generate_project_aware_executive_summary(
+        self,
+        summaries_by_project: Dict[str, List[dict]],
+        analytics: ReportAnalytics,
+        range_description: str
+    ) -> str:
+        """Generate executive summary that explicitly separates projects.
+
+        Args:
+            summaries_by_project: Summaries grouped by project.
+            analytics: Computed analytics.
+            range_description: Time range description.
+
+        Returns:
+            Executive summary string.
+        """
+        # Skip non-work contexts
+        skip_contexts = {'browsing', 'communication', 'music', 'media', 'unknown'}
+
+        # Build per-project summary snippets
+        project_summaries = []
+        for project, summaries in summaries_by_project.items():
+            if project.lower() in skip_contexts:
+                continue
+
+            texts = [s['summary'] for s in summaries if s.get('summary')]
+            if texts:
+                project_summaries.append(f"**{project}**: {'; '.join(texts[:3])}")
+
+        if not project_summaries:
+            return "No significant project activity recorded."
+
+        if not self.summarizer or not self.summarizer.is_available():
+            # Fallback
+            return f"Active time: {analytics.total_active_minutes} minutes.\n\n" + \
+                   "\n".join(project_summaries)
+
+        prompt = f"""Write a brief executive summary for a developer's activity report.
+
+IMPORTANT: The following projects are UNRELATED to each other. Do NOT combine them or suggest connections.
+
+Projects worked on:
+{chr(10).join(project_summaries)}
+
+Total active time: {analytics.total_active_minutes} minutes across {len(summaries_by_project)} distinct contexts.
+Time period: {range_description}
+
+Write 2-3 sentences summarizing the activity. Treat each project as independent work.
+Do NOT say things like "Project A within Project B" - they are separate.
+Format: List main accomplishments per project, then overall productivity note."""
+
+        return self.summarizer.generate_text(prompt)
+
+    def _summary_duration_seconds(self, summary: dict) -> int:
+        """Calculate duration of a summary in seconds."""
+        start = summary.get('start_time')
+        end = summary.get('end_time')
+
+        if not start or not end:
+            return 0
+
+        try:
+            if isinstance(start, datetime):
+                start_dt = start
+            else:
+                start_dt = datetime.fromisoformat(str(start))
+
+            if isinstance(end, datetime):
+                end_dt = end
+            else:
+                end_dt = datetime.fromisoformat(str(end))
+
+            return int((end_dt - start_dt).total_seconds())
+        except Exception:
+            return 0
+
     def _generate_detailed(
         self,
         summaries: List[dict],
         analytics: ReportAnalytics,
         range_description: str,
         start: datetime,
-        end: datetime
+        end: datetime,
+        summaries_by_project: Dict[str, List[dict]] = None
     ) -> Report:
         """Generate day-by-day detailed report.
 
@@ -445,6 +598,7 @@ Be specific and use actual project names and technical terms from the summaries.
             range_description: Human-readable time range.
             start: Start datetime.
             end: End datetime.
+            summaries_by_project: Summaries grouped by project.
 
         Returns:
             Report with sections for each day.
@@ -513,7 +667,8 @@ Be specific and use actual project names and technical terms from the summaries.
         self,
         summaries: List[dict],
         analytics: ReportAnalytics,
-        range_description: str
+        range_description: str,
+        summaries_by_project: Dict[str, List[dict]] = None
     ) -> Report:
         """Generate brief standup-style report.
 
@@ -521,6 +676,7 @@ Be specific and use actual project names and technical terms from the summaries.
             summaries: Existing summaries.
             analytics: Computed analytics.
             range_description: Human-readable time range.
+            summaries_by_project: Summaries grouped by project.
 
         Returns:
             Report with standup-formatted content.

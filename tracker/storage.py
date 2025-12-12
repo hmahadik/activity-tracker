@@ -300,6 +300,76 @@ class ActivityStorage:
                 ON threshold_summaries(start_time, end_time)
             """)
 
+            # Add project column to threshold_summaries if not exists (migration)
+            cursor = conn.execute("PRAGMA table_info(threshold_summaries)")
+            columns = {row[1] for row in cursor.fetchall()}
+            if 'project' not in columns:
+                conn.execute("ALTER TABLE threshold_summaries ADD COLUMN project TEXT")
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_threshold_summary_project
+                    ON threshold_summaries(project)
+                """)
+                logger.info("Added 'project' column to threshold_summaries table")
+
+            # Add prompt_text column to threshold_summaries if not exists (migration)
+            if 'prompt_text' not in columns:
+                conn.execute("ALTER TABLE threshold_summaries ADD COLUMN prompt_text TEXT")
+                logger.info("Added 'prompt_text' column to threshold_summaries table")
+
+            # Junction table for threshold summaries <-> screenshots (proper M:N relationship)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS threshold_summary_screenshots (
+                    summary_id INTEGER NOT NULL REFERENCES threshold_summaries(id) ON DELETE CASCADE,
+                    screenshot_id INTEGER NOT NULL REFERENCES screenshots(id) ON DELETE CASCADE,
+                    PRIMARY KEY (summary_id, screenshot_id)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_tss_screenshot
+                ON threshold_summary_screenshots(screenshot_id)
+            """)
+
+            # Window focus tracking
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS window_focus_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    window_title TEXT NOT NULL,
+                    app_name TEXT NOT NULL,
+                    window_class TEXT,
+                    start_time TIMESTAMP NOT NULL,
+                    end_time TIMESTAMP NOT NULL,
+                    duration_seconds REAL NOT NULL,
+                    session_id INTEGER REFERENCES activity_sessions(id),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_focus_start
+                ON window_focus_events(start_time)
+            """)
+
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_focus_app
+                ON window_focus_events(app_name)
+            """)
+
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_focus_session
+                ON window_focus_events(session_id)
+            """)
+
+            # Add capture_reason and focus_duration columns to screenshots if not exists
+            try:
+                conn.execute("ALTER TABLE screenshots ADD COLUMN capture_reason TEXT")
+            except Exception:
+                pass  # Column already exists
+
+            try:
+                conn.execute("ALTER TABLE screenshots ADD COLUMN focus_duration_at_capture REAL")
+            except Exception:
+                pass  # Column already exists
+
             conn.commit()
     
     def save_screenshot(self, filepath: str, dhash: str, window_title: str = None,
@@ -1211,9 +1281,17 @@ class ActivityStorage:
     def get_unsummarized_screenshots(self) -> List[Dict]:
         """Get screenshots not covered by any threshold summary.
 
+        Only returns screenshots that are part of an active (non-AFK) session.
+        This ensures summaries are generated only for periods of real activity.
+
         Returns:
-            List of screenshot dicts ordered by timestamp, each containing
-            id, timestamp, filepath, window_title, app_name.
+            List of screenshot dicts ordered by timestamp DESC (recent first),
+            each containing id, timestamp, filepath, window_title, app_name.
+
+        Note:
+            Screenshots are returned in reverse chronological order so that
+            the most recent activity is summarized first, providing immediate
+            value to users viewing today's timeline.
         """
         with self.get_connection() as conn:
             cursor = conn.execute("""
@@ -1221,12 +1299,14 @@ class ActivityStorage:
                        s.window_x, s.window_y, s.window_width, s.window_height
                 FROM screenshots s
                 WHERE NOT EXISTS (
-                    SELECT 1 FROM threshold_summaries ts
-                    WHERE ts.screenshot_ids LIKE '%' || s.id || '%'
-                      AND s.timestamp >= strftime('%s', ts.start_time)
-                      AND s.timestamp <= strftime('%s', ts.end_time)
+                    SELECT 1 FROM threshold_summary_screenshots tss
+                    WHERE tss.screenshot_id = s.id
                 )
-                ORDER BY s.timestamp ASC
+                AND EXISTS (
+                    SELECT 1 FROM session_screenshots ss
+                    WHERE ss.screenshot_id = s.id
+                )
+                ORDER BY s.timestamp DESC
             """)
             return [dict(row) for row in cursor.fetchall()]
 
@@ -1240,7 +1320,7 @@ class ActivityStorage:
             cursor = conn.execute("""
                 SELECT id, start_time, end_time, summary, screenshot_ids,
                        screenshot_count, model_used, config_snapshot,
-                       inference_time_ms, created_at, regenerated_from
+                       inference_time_ms, created_at, regenerated_from, project
                 FROM threshold_summaries
                 ORDER BY end_time DESC
                 LIMIT 1
@@ -1263,7 +1343,9 @@ class ActivityStorage:
         model: str,
         config_snapshot: dict,
         inference_ms: int,
-        regenerated_from: int = None
+        regenerated_from: int = None,
+        project: str = None,
+        prompt_text: str = None
     ) -> int:
         """Save a new threshold-based summary.
 
@@ -1276,6 +1358,8 @@ class ActivityStorage:
             config_snapshot: Dict of config settings used
             inference_ms: Time taken for inference
             regenerated_from: ID of original summary if this is a regeneration
+            project: Detected project context name
+            prompt_text: The full prompt text sent to the LLM (for debugging)
 
         Returns:
             ID of the new summary record.
@@ -1285,8 +1369,8 @@ class ActivityStorage:
                 """
                 INSERT INTO threshold_summaries
                     (start_time, end_time, summary, screenshot_ids, screenshot_count,
-                     model_used, config_snapshot, inference_time_ms, regenerated_from)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     model_used, config_snapshot, inference_time_ms, regenerated_from, project, prompt_text)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     start_time,
@@ -1298,10 +1382,19 @@ class ActivityStorage:
                     json.dumps(config_snapshot) if config_snapshot else None,
                     inference_ms,
                     regenerated_from,
+                    project,
+                    prompt_text,
                 ),
             )
+            summary_id = cursor.lastrowid
+
+            # Insert into junction table to track which screenshots are summarized
+            conn.executemany(
+                "INSERT OR IGNORE INTO threshold_summary_screenshots (summary_id, screenshot_id) VALUES (?, ?)",
+                [(summary_id, sid) for sid in screenshot_ids]
+            )
             conn.commit()
-            return cursor.lastrowid
+            return summary_id
 
     def get_threshold_summary(self, summary_id: int) -> Optional[Dict]:
         """Get a threshold summary by ID.
@@ -1317,7 +1410,7 @@ class ActivityStorage:
                 """
                 SELECT id, start_time, end_time, summary, screenshot_ids,
                        screenshot_count, model_used, config_snapshot,
-                       inference_time_ms, created_at, regenerated_from
+                       inference_time_ms, created_at, regenerated_from, project, prompt_text
                 FROM threshold_summaries
                 WHERE id = ?
                 """,
@@ -1329,6 +1422,16 @@ class ActivityStorage:
                 result['screenshot_ids'] = json.loads(result['screenshot_ids'])
                 if result['config_snapshot']:
                     result['config_snapshot'] = json.loads(result['config_snapshot'])
+                # Normalize created_at to ISO format with T separator (UTC to local)
+                if result.get('created_at'):
+                    try:
+                        from datetime import datetime
+                        # Parse UTC timestamp from SQLite
+                        utc_dt = datetime.strptime(result['created_at'], '%Y-%m-%d %H:%M:%S')
+                        # Convert to local time and ISO format
+                        result['created_at'] = utc_dt.strftime('%Y-%m-%dT%H:%M:%S')
+                    except (ValueError, TypeError):
+                        pass  # Keep original if parsing fails
                 return result
             return None
 
@@ -1346,7 +1449,7 @@ class ActivityStorage:
                 """
                 SELECT id, start_time, end_time, summary, screenshot_ids,
                        screenshot_count, model_used, config_snapshot,
-                       inference_time_ms, created_at, regenerated_from
+                       inference_time_ms, created_at, regenerated_from, project
                 FROM threshold_summaries
                 WHERE date(start_time) = ?
                 ORDER BY start_time ASC
@@ -1376,7 +1479,7 @@ class ActivityStorage:
                 """
                 SELECT id, start_time, end_time, summary, screenshot_ids,
                        screenshot_count, model_used, config_snapshot,
-                       inference_time_ms, created_at, regenerated_from
+                       inference_time_ms, created_at, regenerated_from, project
                 FROM threshold_summaries
                 WHERE id = ? OR regenerated_from = ?
                 ORDER BY created_at ASC
@@ -1457,7 +1560,7 @@ class ActivityStorage:
                 """
                 SELECT id, start_time, end_time, summary, screenshot_ids,
                        screenshot_count, model_used, config_snapshot,
-                       inference_time_ms, created_at, regenerated_from,
+                       inference_time_ms, created_at, regenerated_from, project,
                        'threshold' as source
                 FROM threshold_summaries
                 WHERE datetime(start_time) >= datetime(?)
@@ -1554,3 +1657,303 @@ class ActivityStorage:
                     result["screenshot_ids_used"] = json.loads(result["screenshot_ids_used"])
                 results.append(result)
             return results
+
+    # =========================================================================
+    # Project-Aware Summary Methods
+    # =========================================================================
+
+    def get_last_summary_for_project(self, project: str) -> Optional[str]:
+        """Get most recent summary for a specific project.
+
+        Args:
+            project: Project name to query.
+
+        Returns:
+            Summary text or None if no summaries exist for this project.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT summary FROM threshold_summaries
+                WHERE project = ?
+                ORDER BY end_time DESC
+                LIMIT 1
+                """,
+                (project,),
+            )
+            row = cursor.fetchone()
+            return row[0] if row else None
+
+    def get_summaries_by_project(
+        self, start: 'datetime', end: 'datetime'
+    ) -> Dict[str, List[Dict]]:
+        """Get summaries grouped by project for a time range.
+
+        Args:
+            start: Start datetime (inclusive).
+            end: End datetime (inclusive).
+
+        Returns:
+            Dict mapping project_name -> list of summary dicts.
+        """
+        from collections import defaultdict
+
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, start_time, end_time, summary, project, screenshot_ids,
+                       screenshot_count, model_used, inference_time_ms, created_at
+                FROM threshold_summaries
+                WHERE datetime(start_time) >= datetime(?)
+                  AND datetime(start_time) <= datetime(?)
+                ORDER BY start_time ASC
+                """,
+                (start.isoformat(), end.isoformat()),
+            )
+
+            grouped = defaultdict(list)
+            for row in cursor.fetchall():
+                result = dict(row)
+                if result.get('screenshot_ids'):
+                    result['screenshot_ids'] = json.loads(result['screenshot_ids'])
+                project = result.get('project') or 'unknown'
+                grouped[project].append(result)
+
+            return dict(grouped)
+
+    # =========================================================================
+    # Window Focus Tracking Methods
+    # =========================================================================
+
+    def save_focus_event(
+        self,
+        window_title: str,
+        app_name: str,
+        window_class: str,
+        start_time: 'datetime',
+        end_time: 'datetime',
+        session_id: int = None
+    ) -> int:
+        """Save a completed focus event.
+
+        Args:
+            window_title: Title of the focused window.
+            app_name: Application name/class.
+            window_class: X11 window class.
+            start_time: When focus started.
+            end_time: When focus ended.
+            session_id: Optional session ID to link to.
+
+        Returns:
+            ID of the saved focus event.
+        """
+        duration = (end_time - start_time).total_seconds()
+
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO window_focus_events
+                (window_title, app_name, window_class, start_time, end_time, duration_seconds, session_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (window_title, app_name, window_class,
+                 start_time.isoformat(), end_time.isoformat(),
+                 duration, session_id)
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_focus_events_in_range(self, start: 'datetime', end: 'datetime') -> List[Dict]:
+        """Get all focus events that started within time range.
+
+        Args:
+            start: Start datetime (inclusive).
+            end: End datetime (inclusive).
+
+        Returns:
+            List of focus event dicts ordered by start_time.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, window_title, app_name, window_class,
+                       start_time, end_time, duration_seconds, session_id
+                FROM window_focus_events
+                WHERE datetime(start_time) >= datetime(?)
+                  AND datetime(start_time) <= datetime(?)
+                ORDER BY start_time ASC
+                """,
+                (start.isoformat(), end.isoformat())
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_focus_events_overlapping_range(self, start: 'datetime', end: 'datetime') -> List[Dict]:
+        """Get all focus events that overlap with time range.
+
+        This includes events that:
+        - Started within the range
+        - Started before the range but ended during or after range start
+
+        Args:
+            start: Start datetime.
+            end: End datetime.
+
+        Returns:
+            List of focus event dicts ordered by start_time.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, window_title, app_name, window_class,
+                       start_time, end_time, duration_seconds, session_id
+                FROM window_focus_events
+                WHERE datetime(start_time) < datetime(?)
+                  AND (datetime(end_time) > datetime(?) OR end_time IS NULL)
+                ORDER BY start_time ASC
+                """,
+                (end.isoformat(), start.isoformat())
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_app_durations_in_range(self, start: 'datetime', end: 'datetime') -> List[Dict]:
+        """Aggregate duration by app, sorted by total time descending.
+
+        Args:
+            start: Start datetime.
+            end: End datetime.
+
+        Returns:
+            List of dicts with app_name, total_seconds, event_count.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT
+                    app_name,
+                    SUM(duration_seconds) as total_seconds,
+                    COUNT(*) as event_count
+                FROM window_focus_events
+                WHERE datetime(start_time) >= datetime(?)
+                  AND datetime(end_time) <= datetime(?)
+                GROUP BY app_name
+                ORDER BY total_seconds DESC
+                """,
+                (start.isoformat(), end.isoformat())
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_window_durations_in_range(
+        self,
+        start: 'datetime',
+        end: 'datetime',
+        limit: int = 20
+    ) -> List[Dict]:
+        """Aggregate duration by app + window title.
+
+        Args:
+            start: Start datetime.
+            end: End datetime.
+            limit: Maximum results to return.
+
+        Returns:
+            List of dicts with app_name, window_title, total_seconds, event_count.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT
+                    app_name,
+                    window_title,
+                    SUM(duration_seconds) as total_seconds,
+                    COUNT(*) as event_count
+                FROM window_focus_events
+                WHERE datetime(start_time) >= datetime(?)
+                  AND datetime(end_time) <= datetime(?)
+                GROUP BY app_name, window_title
+                ORDER BY total_seconds DESC
+                LIMIT ?
+                """,
+                (start.isoformat(), end.isoformat(), limit)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_hourly_app_breakdown(self, date: str) -> List[Dict]:
+        """Get app usage breakdown by hour for a specific day.
+
+        Args:
+            date: Date string in YYYY-MM-DD format.
+
+        Returns:
+            List of dicts with hour, app_name, seconds.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT
+                    CAST(strftime('%H', start_time) AS INTEGER) as hour,
+                    app_name,
+                    SUM(duration_seconds) as seconds
+                FROM window_focus_events
+                WHERE date(start_time) = ?
+                GROUP BY hour, app_name
+                ORDER BY hour, seconds DESC
+                """,
+                (date,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_context_switch_count(self, start: 'datetime', end: 'datetime') -> int:
+        """Count number of app switches in time range.
+
+        Args:
+            start: Start datetime.
+            end: End datetime.
+
+        Returns:
+            Number of times app changed.
+        """
+        events = self.get_focus_events_in_range(start, end)
+        if len(events) < 2:
+            return 0
+        return sum(
+            1 for i in range(1, len(events))
+            if events[i]['app_name'] != events[i - 1]['app_name']
+        )
+
+    def get_longest_focus_sessions(
+        self,
+        start: 'datetime',
+        end: 'datetime',
+        min_duration_minutes: int = 10,
+        limit: int = 10
+    ) -> List[Dict]:
+        """Find longest uninterrupted focus periods (deep work sessions).
+
+        Args:
+            start: Start datetime.
+            end: End datetime.
+            min_duration_minutes: Minimum duration to include.
+            limit: Maximum results.
+
+        Returns:
+            List of dicts with app_name, window_title, start_time, end_time, duration_seconds.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT
+                    app_name,
+                    window_title,
+                    start_time,
+                    end_time,
+                    duration_seconds
+                FROM window_focus_events
+                WHERE datetime(start_time) >= datetime(?)
+                  AND datetime(end_time) <= datetime(?)
+                  AND duration_seconds >= ?
+                ORDER BY duration_seconds DESC
+                LIMIT ?
+                """,
+                (start.isoformat(), end.isoformat(), min_duration_minutes * 60, limit)
+            )
+            return [dict(row) for row in cursor.fetchall()]

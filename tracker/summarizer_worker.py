@@ -9,6 +9,7 @@ The worker supports:
 - Regeneration of existing summaries with new settings
 - Context continuity via previous summary inclusion
 - OCR extraction for unique window titles
+- Focus-based app/window usage passed to LLM
 """
 
 import json
@@ -61,6 +62,7 @@ class SummarizerWorker:
         """Lazy-load the HybridSummarizer, recreating if model changed."""
         current_model = self.config.config.summarization.model
         current_host = self.config.config.summarization.ollama_host
+        cfg = self.config.config.summarization
 
         # Recreate summarizer if model or host changed
         if self._summarizer is None or self._summarizer_model != current_model:
@@ -69,6 +71,16 @@ class SummarizerWorker:
             self._summarizer = HybridSummarizer(
                 model=current_model,
                 ollama_host=current_host,
+                max_samples=cfg.max_samples,
+                sample_interval_minutes=cfg.sample_interval_minutes,
+                focus_weighted_sampling=cfg.focus_weighted_sampling,
+                # Use summarization_mode if it's not the default
+                # (i.e., user explicitly set it to something other than ocr_and_screenshots)
+                summarization_mode=cfg.summarization_mode if cfg.summarization_mode != "ocr_and_screenshots" else None,
+                # New content mode flags (only used if summarization_mode is None/default)
+                include_focus_context=getattr(cfg, 'include_focus_context', True),
+                include_screenshots=getattr(cfg, 'include_screenshots', True),
+                include_ocr=getattr(cfg, 'include_ocr', True),
             )
             self._summarizer_model = current_model
         return self._summarizer
@@ -96,28 +108,54 @@ class SummarizerWorker:
         logger.info("SummarizerWorker stopped")
 
     def check_and_queue(self):
-        """Check if threshold reached and queue summarization.
+        """Check if enough time has passed and queue summarization.
 
-        Called after each screenshot capture to check if the number of
-        unsummarized screenshots has reached the trigger threshold.
+        Called after each screenshot capture to check if frequency_minutes
+        has elapsed since the last summary. This is duration-based triggering
+        rather than count-based.
         """
         if not self.config.config.summarization.enabled:
             return
 
         try:
-            unsummarized = self.storage.get_unsummarized_screenshots()
-            threshold = self.config.config.summarization.trigger_threshold
+            frequency_minutes = self.config.config.summarization.frequency_minutes
 
-            if len(unsummarized) >= threshold:
-                # Queue the batch for summarization
-                batch = unsummarized[:threshold]
-                self._pending_queue.put(('summarize', batch))
+            # Get the last summary to check when summarization job last ran
+            last_summary = self.storage.get_last_threshold_summary()
+
+            if last_summary:
+                # Use created_at (when job ran), not end_time (screenshot timestamp)
+                created_at_str = last_summary.get('created_at', '')
+                try:
+                    if 'T' in created_at_str:
+                        last_run = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+                        if last_run.tzinfo:
+                            last_run = last_run.replace(tzinfo=None)
+                    else:
+                        last_run = datetime.strptime(created_at_str, '%Y-%m-%d %H:%M:%S')
+                except (ValueError, TypeError):
+                    last_run = None
+
+                if last_run:
+                    elapsed = datetime.now() - last_run
+                    elapsed_minutes = elapsed.total_seconds() / 60
+
+                    if elapsed_minutes < frequency_minutes:
+                        # Not enough time since last summarization job
+                        return
+
+            # Either no previous summary or enough time has passed
+            unsummarized = self.storage.get_unsummarized_screenshots()
+
+            if len(unsummarized) >= 1:
+                # Queue all unsummarized screenshots
+                self._pending_queue.put(('summarize', unsummarized))
                 logger.info(
-                    f"Queued {len(batch)} screenshots for summarization "
-                    f"(threshold: {threshold})"
+                    f"Queued {len(unsummarized)} screenshots for summarization "
+                    f"(frequency: {frequency_minutes}min)"
                 )
         except Exception as e:
-            logger.error(f"Error checking summarization threshold: {e}")
+            logger.error(f"Error checking summarization trigger: {e}")
 
     def queue_regenerate(self, summary_id: int):
         """Queue a summary for regeneration.
@@ -127,6 +165,22 @@ class SummarizerWorker:
         """
         self._pending_queue.put(('regenerate', summary_id))
         logger.info(f"Queued summary {summary_id} for regeneration")
+
+    def force_summarize_pending(self) -> int:
+        """Force immediate summarization of all pending screenshots.
+
+        Returns:
+            Number of screenshots queued for summarization.
+        """
+        unsummarized = self.storage.get_unsummarized_screenshots()
+        if not unsummarized:
+            logger.info("No unsummarized screenshots to process")
+            return 0
+
+        # Queue all pending screenshots for summarization
+        self._pending_queue.put(('summarize', unsummarized))
+        logger.info(f"Force-queued {len(unsummarized)} screenshots for summarization")
+        return len(unsummarized)
 
     def get_status(self) -> Dict:
         """Get current worker status.
@@ -168,11 +222,18 @@ class SummarizerWorker:
     def _do_summarize(self, screenshots: List[Dict]):
         """Generate summary for a batch of screenshots.
 
+        Sends all screenshots to the LLM along with focus events that show
+        app/window usage breakdown. The LLM interprets the activity based on
+        the actual time spent per app/window.
+
         Args:
             screenshots: List of screenshot dicts to summarize
         """
         if not screenshots:
             return
+
+        # Sort by timestamp (ascending) for chronological narrative
+        screenshots = sorted(screenshots, key=lambda s: s['timestamp'])
 
         logger.info(f"Summarizing batch of {len(screenshots)} screenshots...")
 
@@ -181,10 +242,13 @@ class SummarizerWorker:
             logger.error("Summarizer not available (check Ollama and Tesseract)")
             return
 
+        # Gather focus events (app/window usage breakdown)
+        focus_events = self._gather_focus_events(screenshots)
+
         # Get OCR texts for unique window titles
         ocr_texts = self._gather_ocr(screenshots)
 
-        # Get previous summary for context
+        # Get previous summary for context continuity
         previous_summary = None
         if self.config.config.summarization.include_previous_summary:
             last = self.storage.get_last_threshold_summary()
@@ -192,12 +256,12 @@ class SummarizerWorker:
                 previous_summary = last.get('summary')
 
         # Generate summary
-        start_time = time.time()
         try:
             summary, inference_ms, prompt_text, screenshot_ids_used = self.summarizer.summarize_session(
                 screenshots=screenshots,
                 ocr_texts=ocr_texts,
                 previous_summary=previous_summary,
+                focus_events=focus_events,
             )
         except Exception as e:
             logger.error(f"Summary generation failed: {e}")
@@ -207,12 +271,15 @@ class SummarizerWorker:
         config_snapshot = {
             'model': self.config.config.summarization.model,
             'threshold': self.config.config.summarization.trigger_threshold,
-            'ocr_enabled': self.config.config.summarization.ocr_enabled,
+            'summarization_mode': self.config.config.summarization.summarization_mode,
             'crop_to_window': self.config.config.summarization.crop_to_window,
             'include_previous_summary': self.config.config.summarization.include_previous_summary,
+            'max_samples': self.config.config.summarization.max_samples,
+            'sample_interval_minutes': self.config.config.summarization.sample_interval_minutes,
+            'focus_weighted_sampling': self.config.config.summarization.focus_weighted_sampling,
         }
 
-        # Get timestamps from screenshots
+        # Get timestamps
         first_ts = screenshots[0]['timestamp']
         last_ts = screenshots[-1]['timestamp']
         start_iso = datetime.fromtimestamp(first_ts).isoformat()
@@ -227,9 +294,10 @@ class SummarizerWorker:
             model=self.config.config.summarization.model,
             config_snapshot=config_snapshot,
             inference_ms=inference_ms,
+            prompt_text=prompt_text,
         )
 
-        logger.info(f"Saved summary {summary_id}: {summary[:100]}...")
+        logger.info(f"Saved summary {summary_id}: {summary[:80]}...")
 
     def _do_regenerate(self, summary_id: int):
         """Regenerate an existing summary with current settings.
@@ -264,6 +332,7 @@ class SummarizerWorker:
 
         # Use current config (may differ from original)
         ocr_texts = self._gather_ocr(screenshots)
+        focus_events = self._gather_focus_events(screenshots)
 
         # Don't use previous summary for regeneration
         start_time = time.time()
@@ -272,6 +341,7 @@ class SummarizerWorker:
                 screenshots=screenshots,
                 ocr_texts=ocr_texts,
                 previous_summary=None,
+                focus_events=focus_events,
             )
         except Exception as e:
             logger.error(f"Regeneration failed: {e}")
@@ -281,9 +351,12 @@ class SummarizerWorker:
         config_snapshot = {
             'model': self.config.config.summarization.model,
             'threshold': self.config.config.summarization.trigger_threshold,
-            'ocr_enabled': self.config.config.summarization.ocr_enabled,
+            'summarization_mode': self.config.config.summarization.summarization_mode,
             'crop_to_window': self.config.config.summarization.crop_to_window,
             'include_previous_summary': False,  # Not used for regeneration
+            'max_samples': self.config.config.summarization.max_samples,
+            'sample_interval_minutes': self.config.config.summarization.sample_interval_minutes,
+            'focus_weighted_sampling': self.config.config.summarization.focus_weighted_sampling,
         }
 
         # Find the original root ID (in case this is already a regeneration)
@@ -301,6 +374,7 @@ class SummarizerWorker:
             config_snapshot=config_snapshot,
             inference_ms=inference_ms,
             regenerated_from=root_id,
+            prompt_text=prompt_text,
         )
 
         logger.info(f"Regenerated summary {summary_id} -> {new_id}: {summary[:100]}...")
@@ -314,7 +388,8 @@ class SummarizerWorker:
         Returns:
             List of dicts with window_title and ocr_text
         """
-        if not self.config.config.summarization.ocr_enabled:
+        mode = self.config.config.summarization.summarization_mode
+        if mode == "screenshots_only":
             return []
 
         ocr_texts = []
@@ -348,3 +423,111 @@ class SummarizerWorker:
                 logger.debug(f"OCR failed for '{title}': {e}")
 
         return ocr_texts
+
+    def _gather_focus_events(self, screenshots: List[Dict]) -> List[Dict]:
+        """Gather focus events for the time range of screenshots.
+
+        Gets all focus events that overlap with the screenshot time range
+        and clips their durations to the actual range.
+
+        Args:
+            screenshots: List of screenshot dicts with timestamps
+
+        Returns:
+            List of focus event dicts with durations clipped to the query range
+        """
+        if not screenshots:
+            return []
+
+        try:
+            # Get time range from screenshots
+            timestamps = [s.get('timestamp', 0) for s in screenshots]
+            start_ts = min(timestamps)
+            end_ts = max(timestamps)
+
+            # Convert to datetime for storage query
+            start_dt = datetime.fromtimestamp(start_ts)
+            end_dt = datetime.fromtimestamp(end_ts)
+
+            # Get focus events that overlap with the range
+            focus_events = self.storage.get_focus_events_overlapping_range(start_dt, end_dt)
+
+            # Clip durations to the actual query range
+            clipped_events = self._clip_focus_event_durations(
+                focus_events, start_dt, end_dt
+            )
+
+            logger.info(f"Found {len(clipped_events)} focus events for time range "
+                       f"({start_dt.strftime('%H:%M')} - {end_dt.strftime('%H:%M')})")
+            return clipped_events
+
+        except Exception as e:
+            logger.warning(f"Failed to gather focus events: {e}")
+            return []
+
+    def _clip_focus_event_durations(
+        self,
+        events: List[Dict],
+        range_start: datetime,
+        range_end: datetime
+    ) -> List[Dict]:
+        """Clip focus event durations to the specified time range.
+
+        For events that extend beyond the query range, adjusts duration_seconds
+        to only count time within the range.
+
+        Args:
+            events: List of focus event dicts
+            range_start: Start of the query range
+            range_end: End of the query range
+
+        Returns:
+            List of events with clipped durations
+        """
+        clipped = []
+        for event in events:
+            event_copy = dict(event)
+
+            # Parse event times
+            event_start_str = event.get('start_time', '')
+            event_end_str = event.get('end_time', '')
+
+            try:
+                # Handle ISO format with optional microseconds
+                if 'T' in event_start_str:
+                    event_start = datetime.fromisoformat(event_start_str.replace('Z', '+00:00'))
+                else:
+                    event_start = datetime.strptime(event_start_str, '%Y-%m-%d %H:%M:%S')
+
+                if event_end_str:
+                    if 'T' in event_end_str:
+                        event_end = datetime.fromisoformat(event_end_str.replace('Z', '+00:00'))
+                    else:
+                        event_end = datetime.strptime(event_end_str, '%Y-%m-%d %H:%M:%S')
+                else:
+                    # Ongoing event - use range_end as the effective end
+                    event_end = range_end
+
+                # Remove timezone info for comparison if present
+                if event_start.tzinfo:
+                    event_start = event_start.replace(tzinfo=None)
+                if event_end.tzinfo:
+                    event_end = event_end.replace(tzinfo=None)
+
+                # Calculate overlap
+                overlap_start = max(event_start, range_start)
+                overlap_end = min(event_end, range_end)
+
+                if overlap_start < overlap_end:
+                    # There is overlap - calculate clipped duration
+                    clipped_duration = (overlap_end - overlap_start).total_seconds()
+                    event_copy['duration_seconds'] = clipped_duration
+                    clipped.append(event_copy)
+                # If no overlap, skip the event
+
+            except (ValueError, TypeError) as e:
+                # If we can't parse times, include event with original duration
+                logger.debug(f"Could not parse focus event times: {e}")
+                clipped.append(event_copy)
+
+        return clipped

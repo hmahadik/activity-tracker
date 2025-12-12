@@ -318,11 +318,44 @@
             flex-shrink: 0;
         }
 
-        .detail-header h2 {
-            font-size: 1.2rem;
+        .date-selector {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 12px;
+            background: var(--surface-2);
+            border-radius: 6px;
+            border: 1px solid var(--border);
+        }
+
+        .date-selector button {
+            background: var(--surface);
             color: var(--text);
+            border: 1px solid var(--border);
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+
+        .date-selector button:hover {
+            background: var(--border);
+            border-color: var(--accent);
+        }
+
+        .date-selector button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .date-selector h2 {
+            font-size: 1.1rem;
             font-weight: 600;
-            margin-bottom: 8px;
+            flex: 1;
+            text-align: center;
+            margin: 0;
         }
 
         .detail-stats {
@@ -371,7 +404,10 @@
 
         .detail-content-wrapper {
             flex: 1;
-            overflow-y: auto;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
         }
 
         .hour-group {
@@ -658,6 +694,10 @@
             to { transform: rotate(360deg); }
         }
 
+        .spin {
+            animation: spin 1s linear infinite;
+        }
+
         /* Keyboard hint */
         .keyboard-hint {
             position: fixed;
@@ -744,44 +784,6 @@
             border-top-color: white;
             border-radius: 50%;
             animation: spin 1s linear infinite;
-        }
-
-        /* Daily summary section */
-        .daily-summary {
-            margin-bottom: 20px;
-            padding: 15px;
-            background: var(--surface-2);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-        }
-
-        .daily-summary-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-
-        .daily-summary-title {
-            font-size: 0.95rem;
-            font-weight: 600;
-            color: var(--text);
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .daily-summary-content {
-            font-size: 0.9rem;
-            color: var(--text);
-            line-height: 1.6;
-            max-height: 150px;
-            overflow-y: auto;
-        }
-
-        .summary-coverage {
-            font-size: 0.8rem;
-            color: var(--muted);
         }
 
         /* Summary badge on hour blocks */
@@ -1224,8 +1226,13 @@
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: 8px;
-            padding: 20px;
-            margin-top: 20px;
+            padding: 0;
+            margin-top: 15px;
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
         }
 
         .threshold-summaries-panel h3 {
@@ -1236,38 +1243,6 @@
             display: flex;
             align-items: center;
             gap: 8px;
-        }
-
-        .pending-indicator {
-            background: var(--surface-2);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 10px 15px;
-            margin-bottom: 15px;
-            font-size: 0.9rem;
-            color: var(--text);
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .pending-count {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            min-width: 24px;
-            height: 24px;
-            background: var(--accent);
-            color: var(--text-inverse);
-            border-radius: 12px;
-            font-weight: 600;
-            font-size: 0.85rem;
-            padding: 0 8px;
-        }
-
-        .pending-threshold {
-            color: var(--muted);
-            font-size: 0.85rem;
         }
 
         .no-summaries {
@@ -1390,6 +1365,534 @@
 
         .threshold-summary-block .summary-meta .inference-time {
             color: var(--accent);
+        }
+
+        /* Hour section headers */
+        .hour-section-header {
+            background: var(--surface-2);
+            cursor: default;
+        }
+
+        .hour-section-header:hover {
+            background: var(--surface-2) !important;
+        }
+
+        .hour-section-header td {
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .hour-section-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--muted);
+            font-size: 0.8rem;
+        }
+
+        .hour-section-label svg {
+            stroke: var(--accent);
+        }
+
+        .hour-time {
+            font-weight: 600;
+            color: var(--text);
+            font-size: 0.85rem;
+        }
+
+        .hour-count {
+            font-size: 0.75rem;
+            opacity: 0.7;
+        }
+
+        .hour-count.unsummarized {
+            color: var(--danger);
+            opacity: 1;
+        }
+
+        .hour-section-header.no-summaries {
+            background: rgba(248, 81, 73, 0.08);
+            border-left: 3px solid var(--danger);
+        }
+
+        .hour-section-header.no-summaries .hour-section-label svg {
+            stroke: var(--danger);
+        }
+
+        .btn-view-hour {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--muted);
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            margin-left: auto;
+            transition: all 0.2s;
+        }
+
+        .btn-view-hour:hover {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: var(--text-inverse);
+        }
+
+        .btn-generate-hour {
+            background: var(--surface);
+            border: 1px solid var(--success);
+            color: var(--success);
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            margin-left: 6px;
+            transition: all 0.2s;
+        }
+
+        .btn-generate-hour:hover {
+            background: var(--success);
+            color: var(--text-inverse);
+        }
+
+        .btn-generate-hour:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .screen-count {
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+
+        .screen-count:hover {
+            background: var(--accent);
+            color: var(--text-inverse);
+        }
+
+        /* Horizontal Timeline (ActivityWatch style) */
+        .horizontal-timeline {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 15px;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .timeline-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            border-bottom: 1px solid var(--border);
+            background: var(--surface-2);
+        }
+
+        .timeline-header h3 {
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        .timeline-hint {
+            font-size: 0.75rem;
+            color: var(--muted);
+        }
+
+        .timeline-controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .timeline-controls button {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.75rem;
+        }
+
+        .timeline-controls button:hover {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: var(--text-inverse);
+        }
+
+        .btn-generate-missing {
+            background: var(--success, #3fb950) !important;
+            border-color: var(--success, #3fb950) !important;
+            color: #fff !important;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .btn-generate-missing:hover {
+            background: #2ea043 !important;
+            border-color: #2ea043 !important;
+        }
+
+        .btn-generate-missing:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .timeline-body {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .timeline-lanes {
+            cursor: grab;
+            user-select: none;
+        }
+
+        .timeline-lanes:active {
+            cursor: grabbing;
+        }
+
+        .timeline-lane {
+            display: flex;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+            height: 32px;
+        }
+
+        .timeline-lane:last-child {
+            border-bottom: none;
+        }
+
+        .lane-label {
+            width: 140px;
+            min-width: 140px;
+            padding: 0 12px;
+            font-size: 0.75rem;
+            color: var(--muted);
+            background: var(--surface-2);
+            height: 100%;
+            display: flex;
+            align-items: center;
+            border-right: 1px solid var(--border);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .lane-content {
+            flex: 1;
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .lane-events {
+            position: absolute;
+            top: 4px;
+            bottom: 4px;
+            left: 0;
+            right: 0;
+        }
+
+        .lane-event {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            border-radius: 3px;
+            min-width: 2px;
+            cursor: pointer;
+            transition: opacity 0.15s;
+        }
+
+        .lane-event:hover {
+            opacity: 0.8;
+            z-index: 10;
+        }
+
+        .lane-event-label {
+            font-size: 0.65rem;
+            color: #fff;
+            padding: 0 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            line-height: 24px;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        }
+
+        /* Time axis */
+        .timeline-axis {
+            display: flex;
+            align-items: center;
+            height: 24px;
+            border-top: 1px solid var(--border);
+            background: var(--surface-2);
+        }
+
+        .axis-label-spacer {
+            width: 140px;
+            min-width: 140px;
+            border-right: 1px solid var(--border);
+        }
+
+        .axis-content {
+            flex: 1;
+            position: relative;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        .axis-ticks {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            display: flex;
+        }
+
+        .axis-tick {
+            position: absolute;
+            font-size: 0.7rem;
+            color: var(--muted);
+            transform: translateX(-50%);
+            top: 4px;
+        }
+
+        .axis-tick::before {
+            content: '';
+            position: absolute;
+            top: -4px;
+            left: 50%;
+            width: 1px;
+            height: 4px;
+            background: var(--border);
+        }
+
+        /* Tooltip */
+        .timeline-tooltip {
+            position: fixed;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 0.8rem;
+            pointer-events: none;
+            z-index: 1000;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            max-width: 320px;
+        }
+
+        .timeline-tooltip .tooltip-thumbnail {
+            width: 200px;
+            height: auto;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        .timeline-tooltip .tooltip-time {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .timeline-tooltip .tooltip-app {
+            color: var(--accent);
+        }
+
+        .timeline-tooltip .tooltip-title {
+            color: var(--muted);
+            font-size: 0.75rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Lane colors */
+        .lane-event.session { background: #3fb950; }
+        .lane-event.afk { background: #484f58; }
+
+        /* AI Summaries Table */
+        .summaries-table-wrapper {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+        }
+
+        .summaries-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+
+        .summaries-table th,
+        .summaries-table td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .summaries-table th {
+            background: var(--surface-2);
+            font-weight: 600;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: var(--muted);
+            white-space: nowrap;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .summaries-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .summaries-table tbody tr {
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .summaries-table tbody tr:hover {
+            background: var(--surface-2);
+        }
+
+        .summaries-table tbody tr.selected {
+            background: rgba(var(--accent-rgb), 0.15);
+        }
+
+        .summaries-table tbody tr.selected:hover {
+            background: rgba(var(--accent-rgb), 0.2);
+        }
+
+        .summary-checkbox {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: var(--accent);
+        }
+
+        .summary-time {
+            font-weight: 500;
+            white-space: nowrap;
+        }
+
+        .summary-duration {
+            color: var(--muted);
+            font-size: 0.85rem;
+            white-space: nowrap;
+        }
+
+        .summary-text-cell {
+            max-width: 400px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .summary-screens {
+            text-align: center;
+            color: var(--muted);
+        }
+
+        /* Bulk Action Bar */
+        .bulk-action-bar {
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 14px;
+            background: var(--accent);
+            color: var(--text-inverse);
+            border-radius: 7px 7px 0 0;
+            flex-shrink: 0;
+        }
+
+        .bulk-action-bar.visible {
+            display: flex;
+        }
+
+        .bulk-action-bar .selected-count {
+            font-weight: 600;
+        }
+
+        .bulk-action-bar .bulk-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .bulk-action-bar .btn-bulk {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: var(--text-inverse);
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: background 0.2s;
+        }
+
+        .bulk-action-bar .btn-bulk:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .bulk-action-bar .btn-bulk.danger:hover {
+            background: var(--danger);
+        }
+
+        .bulk-action-bar .btn-cancel {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+
+        .project-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #fff;
+            text-transform: lowercase;
+        }
+
+        .project-filter {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+
+        .project-filter-btn {
+            padding: 4px 12px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--surface);
+            color: var(--text);
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .project-filter-btn:hover {
+            border-color: var(--accent);
+        }
+
+        .project-filter-btn.active {
+            background: var(--accent);
+            color: var(--text-inverse);
+            border-color: var(--accent);
         }
 
         /* History Modal */
@@ -1651,7 +2154,11 @@
 
             <div class="detail-panel">
                 <div class="detail-header">
-                    <h2 id="selectedDate">Select a day</h2>
+                    <div class="date-selector">
+                        <button id="prevDayBtn" onclick="navigateDay(-1)" title="Previous day">←</button>
+                        <h2 id="selectedDate">Select a day</h2>
+                        <button id="nextDayBtn" onclick="navigateDay(1)" title="Next day">→</button>
+                    </div>
                 </div>
 
                 <div id="detailContent" class="detail-content-wrapper">
@@ -1675,9 +2182,9 @@
     <div id="imageModal" class="modal">
         <span class="modal-close">&times;</span>
         <div class="modal-content">
-            <div class="modal-nav modal-nav-prev" id="modalPrev">&lsaquo;</div>
+            <div class="modal-nav modal-nav-prev" id="modalPrev">←</div>
             <img id="modalImage" class="modal-image" alt="Full size screenshot">
-            <div class="modal-nav modal-nav-next" id="modalNext">&rsaquo;</div>
+            <div class="modal-nav modal-nav-next" id="modalNext">→</div>
         </div>
         <div class="modal-info">
             <div class="modal-metadata">
@@ -1743,6 +2250,26 @@
             state.chart.update();
         }
 
+        // Generate consistent color for project badges
+        function projectColor(projectName) {
+            if (!projectName) return '#666';
+            let hash = 0;
+            for (let i = 0; i < projectName.length; i++) {
+                hash = projectName.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            const hue = Math.abs(hash) % 360;
+            // Use HSL with fixed saturation/lightness for readable badges
+            return `hsl(${hue}, 60%, 45%)`;
+        }
+
+        // Get local date string in YYYY-MM-DD format (not UTC)
+        function getLocalDateString(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
         // State management
         const state = {
             currentYear: new Date().getFullYear(),
@@ -1753,8 +2280,498 @@
             chart: null,
             summaries: {},  // hour -> summary text
             generatingStatus: null,
-            pollInterval: null
+            pollInterval: null,
+            selectedSummaries: new Set(),  // Selected summary IDs for bulk actions
+            lastClickedCheckboxIndex: null, // For shift+click multi-select
+            // Horizontal timeline state
+            timeline: {
+                viewStart: 0,      // Start time (ms from day start)
+                viewEnd: 86400000, // End time (ms, full day = 24h)
+                isDragging: false,
+                dragStartX: 0,
+                dragStartViewStart: 0,
+                sessions: [],
+                focusEvents: [],
+                screenshots: []
+            }
         };
+
+        // App color palette for consistent coloring
+        const appColors = {};
+        const colorPalette = [
+            '#58a6ff', '#3fb950', '#f0883e', '#a371f7', '#f778ba',
+            '#79c0ff', '#56d364', '#ffa657', '#bc8cff', '#ff9bce',
+            '#1f6feb', '#238636', '#9e6a03', '#8957e5', '#bf4b8a',
+            '#388bfd', '#2ea043', '#d29922', '#a475f9', '#db61a2'
+        ];
+
+        function getAppColor(appName) {
+            if (!appName) return '#484f58';
+            if (!appColors[appName]) {
+                const index = Object.keys(appColors).length % colorPalette.length;
+                appColors[appName] = colorPalette[index];
+            }
+            return appColors[appName];
+        }
+
+        // ==================== Horizontal Timeline (ActivityWatch style) ====================
+
+        function renderHorizontalTimeline(dateStr) {
+            const container = document.getElementById('detailContent');
+            const dayStart = new Date(`${dateStr}T00:00:00`).getTime();
+
+            // Reset view to full day
+            state.timeline.viewStart = 0;
+            state.timeline.viewEnd = 86400000; // 24 hours in ms
+            state.timeline.dayStart = dayStart;
+
+            // Create timeline HTML
+            const timelineHtml = `
+                <div class="horizontal-timeline" id="horizontalTimeline">
+                    <div class="timeline-header">
+                        <h3>Activity Timeline</h3>
+                        <span class="timeline-hint">Drag to pan, scroll to zoom</span>
+                        <div class="timeline-controls">
+                            <button class="btn-generate-missing" id="btnGenerateMissing" onclick="triggerSummarization()" title="Generate summaries for all unsummarized screenshots">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                                Generate Missing
+                            </button>
+                            <button onclick="zoomTimeline(0.5)">Zoom In</button>
+                            <button onclick="zoomTimeline(2)">Zoom Out</button>
+                            <button onclick="resetTimelineZoom()">Reset</button>
+                        </div>
+                    </div>
+                    <div class="timeline-body">
+                        <div class="timeline-lanes" id="timelineLanes">
+                            <div class="timeline-lane" data-lane="sessions">
+                                <div class="lane-label">Active Sessions</div>
+                                <div class="lane-content">
+                                    <div class="lane-events" id="laneSessionEvents"></div>
+                                </div>
+                            </div>
+                            <div class="timeline-lane" data-lane="apps">
+                                <div class="lane-label">Applications</div>
+                                <div class="lane-content">
+                                    <div class="lane-events" id="laneAppEvents"></div>
+                                </div>
+                            </div>
+                            <div class="timeline-lane" data-lane="screenshots">
+                                <div class="lane-label">Screenshots</div>
+                                <div class="lane-content">
+                                    <div class="lane-events" id="laneScreenshots"></div>
+                                </div>
+                            </div>
+                            <div class="timeline-lane" data-lane="summaries">
+                                <div class="lane-label">AI Summaries</div>
+                                <div class="lane-content">
+                                    <div class="lane-events" id="laneSummaries"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="timeline-axis">
+                            <div class="axis-label-spacer"></div>
+                            <div class="axis-content">
+                                <div class="axis-ticks" id="axisTicks"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Insert timeline at start of container
+            container.insertAdjacentHTML('afterbegin', timelineHtml);
+
+            // Render events
+            updateTimelineView();
+
+            // Set up interaction handlers
+            setupTimelineInteractions();
+        }
+
+        function updateTimelineView() {
+            const { viewStart, viewEnd, dayStart, sessions, focusEvents, screenshots } = state.timeline;
+            const viewDuration = viewEnd - viewStart;
+
+            // Get container width
+            const laneContent = document.querySelector('.lane-content');
+            if (!laneContent) return;
+            const containerWidth = laneContent.offsetWidth;
+
+            // Helper: convert time to pixel position
+            const timeToX = (timeMs) => {
+                const offsetFromViewStart = timeMs - viewStart;
+                return (offsetFromViewStart / viewDuration) * containerWidth;
+            };
+
+            // Helper: convert duration to width
+            const durationToWidth = (durationMs) => {
+                return (durationMs / viewDuration) * containerWidth;
+            };
+
+            // Render sessions lane (active periods)
+            const sessionsContainer = document.getElementById('laneSessionEvents');
+            if (sessionsContainer) {
+                sessionsContainer.innerHTML = '';
+                sessions.forEach(session => {
+                    const startTime = new Date(session.start_time).getTime() - dayStart;
+                    const endTime = session.end_time ? new Date(session.end_time).getTime() - dayStart : Date.now() - dayStart;
+
+                    // Skip if outside view
+                    if (endTime < viewStart || startTime > viewEnd) return;
+
+                    const x = timeToX(Math.max(startTime, viewStart));
+                    const width = durationToWidth(Math.min(endTime, viewEnd) - Math.max(startTime, viewStart));
+
+                    if (width < 1) return;
+
+                    const event = document.createElement('div');
+                    event.className = 'lane-event session';
+                    event.style.left = `${x}px`;
+                    event.style.width = `${width}px`;
+                    event.title = `Session: ${formatDuration((endTime - startTime) / 1000)}`;
+
+                    if (width > 50) {
+                        event.innerHTML = `<span class="lane-event-label">Active</span>`;
+                    }
+
+                    sessionsContainer.appendChild(event);
+                });
+            }
+
+            // Render apps lane (focus events)
+            const appsContainer = document.getElementById('laneAppEvents');
+            if (appsContainer) {
+                appsContainer.innerHTML = '';
+                focusEvents.forEach(event => {
+                    const startTime = new Date(event.start_time).getTime() - dayStart;
+                    const endTime = event.end_time ? new Date(event.end_time).getTime() - dayStart : startTime + (event.duration_seconds * 1000);
+
+                    // Skip if outside view
+                    if (endTime < viewStart || startTime > viewEnd) return;
+
+                    const x = timeToX(Math.max(startTime, viewStart));
+                    const width = durationToWidth(Math.min(endTime, viewEnd) - Math.max(startTime, viewStart));
+
+                    if (width < 1) return;
+
+                    const el = document.createElement('div');
+                    el.className = 'lane-event';
+                    el.style.left = `${x}px`;
+                    el.style.width = `${width}px`;
+                    el.style.background = getAppColor(event.app_name);
+                    el.dataset.app = event.app_name || '';
+                    el.dataset.title = event.window_title || '';
+                    el.dataset.start = event.start_time;
+                    el.dataset.duration = event.duration_seconds;
+
+                    if (width > 40) {
+                        const label = event.app_name || 'Unknown';
+                        el.innerHTML = `<span class="lane-event-label">${label}</span>`;
+                    }
+
+                    // Tooltip on hover
+                    el.addEventListener('mouseenter', (e) => showTimelineTooltip(e, event));
+                    el.addEventListener('mouseleave', hideTimelineTooltip);
+
+                    appsContainer.appendChild(el);
+                });
+            }
+
+            // Render screenshots lane
+            const screenshotsContainer = document.getElementById('laneScreenshots');
+            if (screenshotsContainer) {
+                screenshotsContainer.innerHTML = '';
+                screenshots.forEach(screenshot => {
+                    const timestamp = screenshot.timestamp * 1000; // Convert to ms
+                    const timeMs = timestamp - dayStart;
+
+                    // Skip if outside view
+                    if (timeMs < viewStart || timeMs > viewEnd) return;
+
+                    const x = timeToX(timeMs);
+                    const width = Math.max(4, durationToWidth(30000)); // 30sec minimum visual width
+
+                    const el = document.createElement('div');
+                    el.className = 'lane-event';
+                    el.style.left = `${x - width/2}px`;
+                    el.style.width = `${width}px`;
+                    el.style.background = getAppColor(screenshot.app_name);
+                    el.style.cursor = 'pointer';
+
+                    el.addEventListener('click', () => {
+                        window.showModalWithScreenshots(screenshot.id, screenshots);
+                    });
+
+                    el.addEventListener('mouseenter', (e) => {
+                        showTimelineTooltip(e, {
+                            app_name: screenshot.app_name,
+                            window_title: screenshot.window_title,
+                            start_time: new Date(timestamp).toISOString(),
+                            duration_seconds: 0
+                        }, screenshot.id);
+                    });
+                    el.addEventListener('mouseleave', hideTimelineTooltip);
+
+                    screenshotsContainer.appendChild(el);
+                });
+            }
+
+            // Render summaries lane
+            const summariesContainer = document.getElementById('laneSummaries');
+            if (summariesContainer && state.thresholdSummaries) {
+                summariesContainer.innerHTML = '';
+                state.thresholdSummaries.forEach(summary => {
+                    const startTime = new Date(summary.start_time).getTime() - dayStart;
+                    const endTime = new Date(summary.end_time).getTime() - dayStart;
+
+                    // Skip if outside view
+                    if (endTime < viewStart || startTime > viewEnd) return;
+
+                    const x = timeToX(Math.max(startTime, viewStart));
+                    const width = durationToWidth(Math.min(endTime, viewEnd) - Math.max(startTime, viewStart));
+
+                    if (width < 1) return;
+
+                    const el = document.createElement('div');
+                    el.className = 'lane-event summary';
+                    el.style.left = `${x}px`;
+                    el.style.width = `${width}px`;
+                    el.style.background = projectColor(summary.project || 'unknown');
+                    el.style.cursor = 'pointer';
+                    el.dataset.summaryId = summary.id;
+
+                    if (width > 30) {
+                        const label = summary.project || 'Summary';
+                        el.innerHTML = `<span class="lane-event-label">${label}</span>`;
+                    }
+
+                    el.addEventListener('click', () => {
+                        // Scroll to and highlight the summary in the table
+                        const row = document.querySelector(`tr[data-summary-id="${summary.id}"]`);
+                        if (row) {
+                            row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            row.style.background = 'rgba(88, 166, 255, 0.3)';
+                            setTimeout(() => row.style.background = '', 2000);
+                        }
+                    });
+
+                    el.addEventListener('mouseenter', (e) => {
+                        showTimelineTooltip(e, {
+                            app_name: summary.project || 'Summary',
+                            window_title: summary.summary.substring(0, 100) + (summary.summary.length > 100 ? '...' : ''),
+                            start_time: summary.start_time,
+                            duration_seconds: (new Date(summary.end_time) - new Date(summary.start_time)) / 1000
+                        });
+                    });
+                    el.addEventListener('mouseleave', hideTimelineTooltip);
+
+                    summariesContainer.appendChild(el);
+                });
+            }
+
+            // Render time axis
+            renderTimeAxis();
+        }
+
+        function renderTimeAxis() {
+            const { viewStart, viewEnd } = state.timeline;
+            const viewDuration = viewEnd - viewStart;
+            const axisTicks = document.getElementById('axisTicks');
+            if (!axisTicks) return;
+
+            const containerWidth = axisTicks.parentElement.offsetWidth;
+
+            // Determine tick interval based on zoom level
+            const hourMs = 3600000;
+            const minuteMs = 60000;
+            let tickInterval;
+            let labelFormat;
+
+            if (viewDuration <= hourMs) {
+                tickInterval = 5 * minuteMs; // 5 min
+                labelFormat = 'minute';
+            } else if (viewDuration <= 4 * hourMs) {
+                tickInterval = 15 * minuteMs; // 15 min
+                labelFormat = 'minute';
+            } else if (viewDuration <= 12 * hourMs) {
+                tickInterval = 30 * minuteMs; // 30 min
+                labelFormat = 'hour';
+            } else {
+                tickInterval = hourMs; // 1 hour
+                labelFormat = 'hour';
+            }
+
+            // Calculate first tick
+            const firstTick = Math.ceil(viewStart / tickInterval) * tickInterval;
+
+            axisTicks.innerHTML = '';
+            for (let t = firstTick; t <= viewEnd; t += tickInterval) {
+                const x = ((t - viewStart) / viewDuration) * containerWidth;
+                const tick = document.createElement('div');
+                tick.className = 'axis-tick';
+                tick.style.left = `${x}px`;
+
+                // Format time
+                const date = new Date(state.timeline.dayStart + t);
+                if (labelFormat === 'minute') {
+                    tick.textContent = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+                } else {
+                    tick.textContent = date.toLocaleTimeString([], { hour: 'numeric', hour12: true });
+                }
+
+                axisTicks.appendChild(tick);
+            }
+        }
+
+        function setupTimelineInteractions() {
+            const lanes = document.getElementById('timelineLanes');
+            if (!lanes) return;
+
+            // Pan with drag
+            lanes.addEventListener('mousedown', (e) => {
+                state.timeline.isDragging = true;
+                state.timeline.dragStartX = e.clientX;
+                state.timeline.dragStartViewStart = state.timeline.viewStart;
+                lanes.style.cursor = 'grabbing';
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!state.timeline.isDragging) return;
+
+                const dx = e.clientX - state.timeline.dragStartX;
+                const containerWidth = document.querySelector('.lane-content')?.offsetWidth || 1;
+                const viewDuration = state.timeline.viewEnd - state.timeline.viewStart;
+                const timeDelta = (dx / containerWidth) * viewDuration;
+
+                let newStart = state.timeline.dragStartViewStart - timeDelta;
+                let newEnd = newStart + viewDuration;
+
+                // Clamp to day bounds
+                if (newStart < 0) {
+                    newStart = 0;
+                    newEnd = viewDuration;
+                }
+                if (newEnd > 86400000) {
+                    newEnd = 86400000;
+                    newStart = newEnd - viewDuration;
+                }
+
+                state.timeline.viewStart = newStart;
+                state.timeline.viewEnd = newEnd;
+                updateTimelineView();
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (state.timeline.isDragging) {
+                    state.timeline.isDragging = false;
+                    const lanes = document.getElementById('timelineLanes');
+                    if (lanes) lanes.style.cursor = 'grab';
+                }
+            });
+
+            // Zoom with scroll
+            lanes.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const zoomFactor = e.deltaY > 0 ? 1.2 : 0.8;
+                zoomTimelineAt(e.clientX, zoomFactor);
+            });
+        }
+
+        function zoomTimeline(factor) {
+            const containerWidth = document.querySelector('.lane-content')?.offsetWidth || 1;
+            const centerX = containerWidth / 2;
+            zoomTimelineAt(centerX + document.querySelector('.lane-label').offsetWidth, factor);
+        }
+
+        function zoomTimelineAt(clientX, factor) {
+            const laneContent = document.querySelector('.lane-content');
+            if (!laneContent) return;
+
+            const rect = laneContent.getBoundingClientRect();
+            const mouseX = clientX - rect.left;
+            const containerWidth = laneContent.offsetWidth;
+
+            const { viewStart, viewEnd } = state.timeline;
+            const viewDuration = viewEnd - viewStart;
+            const mouseTime = viewStart + (mouseX / containerWidth) * viewDuration;
+
+            let newDuration = viewDuration * factor;
+
+            // Clamp zoom level
+            const minDuration = 5 * 60000; // 5 minutes minimum
+            const maxDuration = 86400000; // 24 hours maximum
+            newDuration = Math.max(minDuration, Math.min(maxDuration, newDuration));
+
+            // Calculate new view centered on mouse position
+            const mouseRatio = mouseX / containerWidth;
+            let newStart = mouseTime - (mouseRatio * newDuration);
+            let newEnd = newStart + newDuration;
+
+            // Clamp to day bounds
+            if (newStart < 0) {
+                newStart = 0;
+                newEnd = newDuration;
+            }
+            if (newEnd > 86400000) {
+                newEnd = 86400000;
+                newStart = Math.max(0, newEnd - newDuration);
+            }
+
+            state.timeline.viewStart = newStart;
+            state.timeline.viewEnd = newEnd;
+            updateTimelineView();
+        }
+
+        function resetTimelineZoom() {
+            state.timeline.viewStart = 0;
+            state.timeline.viewEnd = 86400000;
+            updateTimelineView();
+        }
+
+        function formatDuration(seconds) {
+            if (seconds < 60) return `${Math.round(seconds)}s`;
+            if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+            const hours = Math.floor(seconds / 3600);
+            const mins = Math.round((seconds % 3600) / 60);
+            return `${hours}h ${mins}m`;
+        }
+
+        // Tooltip
+        let tooltipEl = null;
+
+        function showTimelineTooltip(e, event, screenshotId = null) {
+            if (!tooltipEl) {
+                tooltipEl = document.createElement('div');
+                tooltipEl.className = 'timeline-tooltip';
+                document.body.appendChild(tooltipEl);
+            }
+
+            const startTime = new Date(event.start_time);
+            const timeStr = startTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+            const duration = event.duration_seconds ? formatDuration(event.duration_seconds) : '';
+
+            // Include thumbnail if screenshotId is provided
+            const thumbnailHtml = screenshotId
+                ? `<img class="tooltip-thumbnail" src="/thumbnail/${screenshotId}" alt="Screenshot">`
+                : '';
+
+            tooltipEl.innerHTML = `
+                ${thumbnailHtml}
+                <div class="tooltip-time">${timeStr}${duration ? ` (${duration})` : ''}</div>
+                <div class="tooltip-app">${event.app_name || 'Unknown'}</div>
+                ${event.window_title ? `<div class="tooltip-title">${event.window_title}</div>` : ''}
+            `;
+
+            tooltipEl.style.display = 'block';
+            tooltipEl.style.left = `${e.clientX + 10}px`;
+            tooltipEl.style.top = `${e.clientY + 10}px`;
+        }
+
+        function hideTimelineTooltip() {
+            if (tooltipEl) {
+                tooltipEl.style.display = 'none';
+            }
+        }
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
@@ -1763,7 +2780,7 @@
 
             // Load calendar and auto-select today on page load
             const today = new Date();
-            const todayStr = today.toISOString().split('T')[0];
+            const todayStr = getLocalDateString(today);
 
             loadCalendar().then(() => {
                 // Automatically select today's date when page loads
@@ -1779,7 +2796,7 @@
             todayLink.addEventListener('click', (e) => {
                 e.preventDefault();
                 const today = new Date();
-                const todayStr = today.toISOString().split('T')[0];
+                const todayStr = getLocalDateString(today);
 
                 // Check if we need to change month
                 const currentMonth = today.getMonth() + 1;
@@ -1825,7 +2842,7 @@
                         break;
                     case 'd':
                         if (!e.metaKey && !e.ctrlKey) {
-                            const today = new Date().toISOString().split('T')[0];
+                            const today = getLocalDateString(new Date());
                             selectDate(today);
                         }
                         break;
@@ -1869,10 +2886,10 @@
         function navigateDay(delta) {
             if (!state.selectedDate) return;
 
-            const currentDate = new Date(state.selectedDate);
+            const currentDate = new Date(state.selectedDate + 'T12:00:00');  // Use noon to avoid timezone issues
             currentDate.setDate(currentDate.getDate() + delta);
 
-            const dateStr = currentDate.toISOString().split('T')[0];
+            const dateStr = getLocalDateString(currentDate);
 
             // Check if we need to change month
             const newMonth = currentDate.getMonth() + 1;
@@ -1931,7 +2948,7 @@
 
             // Get today's date for highlighting
             const today = new Date();
-            const todayStr = today.toISOString().split('T')[0];
+            const todayStr = getLocalDateString(today);
 
             // Add days
             state.calendarData.forEach(day => {
@@ -1998,26 +3015,31 @@
             detailContent.innerHTML = '<div class="loading"><div class="spinner"></div><div>Loading...</div></div>';
 
             try {
-                // Fetch summary, hourly data, AI summaries, sessions, and threshold summaries
-                const [summaryRes, hourlyRes, aiSummaryRes, sessionsData, thresholdRes, pendingRes] = await Promise.all([
+                // Fetch summary, hourly data, threshold summaries, sessions, and focus events
+                const startISO = `${dateStr}T00:00:00`;
+                const endISO = `${dateStr}T23:59:59`;
+
+                const [summaryRes, hourlyRes, thresholdRes, sessionsRes, focusRes, screenshotsRes] = await Promise.all([
                     fetch(`/api/day/${dateStr}/summary`),
                     fetch(`/api/day/${dateStr}/hourly`),
-                    fetch(`/api/summaries/${dateStr}`),
-                    loadSessions(dateStr),
                     fetch(`/api/threshold-summaries/${dateStr}`),
-                    fetch('/api/threshold-summaries/pending')
+                    fetch(`/api/sessions/${dateStr}`),
+                    fetch(`/api/analytics/focus/timeline?start=${startISO}&end=${endISO}`),
+                    fetch(`/api/screenshots/${dateStr}`)
                 ]);
 
                 const summaryData = await summaryRes.json();
                 const hourlyData = await hourlyRes.json();
-                const aiSummaryData = await aiSummaryRes.json();
                 const thresholdData = await thresholdRes.json();
-                const pendingData = await pendingRes.json();
+                const sessionsData = await sessionsRes.json();
+                const focusData = await focusRes.json();
+                const screenshotsData = await screenshotsRes.json();
 
-                // Store threshold summaries and pending count in state
+                // Store data in state
                 state.thresholdSummaries = thresholdData.summaries || [];
-                state.pendingCount = pendingData.unsummarized_count || 0;
-                state.threshold = pendingData.threshold || 10;
+                state.timeline.sessions = sessionsData.sessions || [];
+                state.timeline.focusEvents = focusData.events || [];
+                state.timeline.screenshots = screenshotsData.screenshots || [];
 
                 if (summaryData.error || hourlyData.error) {
                     throw new Error(summaryData.error || hourlyData.error);
@@ -2026,15 +3048,8 @@
                 const summary = summaryData.summary;
                 const hourly = hourlyData.hourly;
 
-                // Store AI summaries in state
-                state.summaries = {};
-                if (aiSummaryData.summaries) {
-                    aiSummaryData.summaries.forEach(s => {
-                        if (s.summary) {
-                            state.summaries[s.hour] = s.summary;
-                        }
-                    });
-                }
+                // Store hourly data for use in rendering
+                state.hourlyData = hourly;
 
                 // Update stats
                 updateStats(summary);
@@ -2050,18 +3065,16 @@
                     return;
                 }
 
-                // Try to render sessions first, fall back to hourly if no sessions
-                if (sessionsData && sessionsData.sessions && sessionsData.sessions.length > 0) {
-                    // Render session-based view
-                    renderSessions(sessionsData);
-                    // Also render the hourly chart in the left panel
-                    renderHourlyChartOnly(hourly);
-                } else {
-                    // Fall back to hourly view
-                    renderHourlyChart(hourly, aiSummaryData);
-                }
+                // Clear loading spinner before rendering content
+                detailContent.innerHTML = '';
 
-                // Render threshold summaries panel
+                // Render horizontal timeline (ActivityWatch style)
+                renderHorizontalTimeline(dateStr);
+
+                // Render hourly chart
+                renderHourlyChartOnly(hourly);
+
+                // Render summaries table with hourly sections
                 renderThresholdSummaries();
 
             } catch (error) {
@@ -2084,6 +3097,12 @@
 
             if (state.chart) {
                 state.chart.destroy();
+            }
+
+            // Clean up old scroll observer
+            if (state.scrollObserver) {
+                state.scrollObserver.disconnect();
+                state.scrollObserver = null;
             }
 
             const labels = hourlyData.map(h => `${h.hour}:00`);
@@ -2125,6 +3144,14 @@
                             borderWidth: 1,
                             titleColor: theme.text,
                             bodyColor: theme.text
+                        }
+                    },
+                    onClick: (event, elements) => {
+                        if (elements.length > 0) {
+                            const index = elements[0].index;
+                            const label = state.chart.data.labels[index];
+                            const hour = parseInt(label);
+                            scrollToHourSection(hour);
                         }
                     }
                 }
@@ -2381,7 +3408,7 @@
                         card.className = 'screenshot-card';
                         card.innerHTML = `
                             <img
-                                src="/screenshot/${screenshot.id}"
+                                src="/thumbnail/${screenshot.id}"
                                 alt="Screenshot at ${time}"
                                 class="screenshot-img"
                                 loading="lazy"
@@ -2756,550 +3783,553 @@
             return div.innerHTML;
         }
 
-        // Load sessions for the selected date
-        async function loadSessions(dateStr) {
-            try {
-                const response = await fetch(`/api/sessions/${dateStr}`);
-                const data = await response.json();
+        // Toggle hour group collapse/expand
+        function toggleHourGroup(hour) {
+            const group = document.querySelector(`.hour-group[data-hour="${hour}"]`);
+            if (group) {
+                group.classList.toggle('collapsed');
+            }
+        }
 
-                if (data.error) {
-                    console.error('Sessions error:', data.error);
-                    return null;
+        // ==================== Table Selection ====================
+
+        // Handle row click - navigate to detail page
+        function handleRowClick(event, summaryId) {
+            // Navigate to detail page
+            window.location.href = `/summary/${summaryId}`;
+        }
+
+        // Handle checkbox click with shift+click support
+        function handleCheckboxClick(event, summaryId) {
+            event.stopPropagation();
+            const checkbox = event.target;
+            const row = checkbox.closest('tr');
+            const allCheckboxes = Array.from(document.querySelectorAll('.summaries-table tbody .summary-checkbox'));
+            const currentIndex = allCheckboxes.indexOf(checkbox);
+
+            // Shift+click for range selection
+            if (event.shiftKey && state.lastClickedCheckboxIndex !== null && state.lastClickedCheckboxIndex !== currentIndex) {
+                const start = Math.min(state.lastClickedCheckboxIndex, currentIndex);
+                const end = Math.max(state.lastClickedCheckboxIndex, currentIndex);
+                const shouldSelect = checkbox.checked;
+
+                for (let i = start; i <= end; i++) {
+                    const cb = allCheckboxes[i];
+                    const cbRow = cb.closest('tr');
+                    const cbId = parseInt(cb.dataset.id);
+
+                    cb.checked = shouldSelect;
+                    if (shouldSelect) {
+                        state.selectedSummaries.add(cbId);
+                        cbRow.classList.add('selected');
+                    } else {
+                        state.selectedSummaries.delete(cbId);
+                        cbRow.classList.remove('selected');
+                    }
                 }
-
-                return data;
-            } catch (error) {
-                console.error('Failed to load sessions:', error);
-                return null;
-            }
-        }
-
-        // Render sessions in the detail panel
-        function renderSessions(sessionsData) {
-            const detailContent = document.getElementById('detailContent');
-
-            if (!sessionsData || sessionsData.sessions.length === 0) {
-                // Fall back to hourly view if no sessions
-                return false;
-            }
-
-            const sessions = sessionsData.sessions;
-            const pendingCount = sessions.filter(s => !s.summary).length;
-
-            let html = `
-                <div class="sessions-summary">
-                    <div class="sessions-stats">
-                        <strong>${sessions.length}</strong> session${sessions.length !== 1 ? 's' : ''},
-                        <strong>${sessionsData.total_active_minutes}</strong> minutes active
-                        <span class="info-icon">?
-                            <span class="info-tooltip">A session is a continuous period of activity. Sessions are automatically created when you become active and ended when you go AFK (away from keyboard) for more than 3 minutes.</span>
-                        </span>
-                    </div>
-                    ${pendingCount > 0 ? `
-                        <button class="generate-btn" onclick="summarizePendingSessions('${sessionsData.date}')">
-                            Summarize ${pendingCount} pending
-                        </button>
-                    ` : ''}
-                </div>
-                <div class="session-list" id="sessionList">
-            `;
-
-            sessions.forEach(session => {
-                const startTime = new Date(session.start_time);
-                const endTime = session.end_time ? new Date(session.end_time) : null;
-                const startStr = startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                const endStr = endTime ? endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'ongoing';
-                const isActive = !session.end_time;
-
-                const statusClass = isActive ? 'active' : (session.summary ? 'summarized' : 'pending');
-                const statusText = isActive ? 'Active' : (session.summary ? 'Summarized' : 'Pending');
-
-                // Calculate sampled screenshots (approx 1 per 10 min, max 10)
-                const durationMin = session.duration_minutes || 0;
-                const idealSamples = Math.max(1, Math.floor(durationMin / 10));
-                const sampledCount = Math.min(idealSamples, 10, session.screenshot_count);
-
-                const inferenceTimeStr = session.inference_time_ms
-                    ? `${(session.inference_time_ms / 1000).toFixed(1)}s`
-                    : 'N/A';
-
-                html += `
-                    <div class="session-card" data-session-id="${session.id}">
-                        <div class="session-header" onclick="toggleSessionExpand(${session.id})">
-                            <div class="session-time">
-                                ${startStr} - ${endStr}
-                                <span class="session-duration">${session.duration_minutes}m</span>
-                                <span class="session-status ${statusClass}">${statusText}</span>
-                            </div>
-                            <div class="session-meta">
-                                <span>${session.screenshot_count} screenshots</span>
-                                <span>${session.unique_windows} windows</span>
-                            </div>
-                        </div>
-                        <div class="session-summary-preview ${session.summary ? '' : 'no-summary'}">
-                            <div style="display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap;">
-                                <span style="flex: 1;">${session.summary || 'No summary yet'}</span>
-                                ${session.summary ? `
-                                    <span class="summary-details-toggle" onclick="event.stopPropagation(); toggleSummaryDetails(${session.id})">
-                                        Details <span class="info-icon" style="margin-left: 2px;">?
-                                            <span class="info-tooltip">View details about how this summary was generated, including the AI model used, inference time, and the exact API request sent to Ollama.</span>
-                                        </span>
-                                    </span>
-                                ` : ''}
-                                ${!session.summary && !isActive ? `
-                                    <button class="generate-btn" onclick="event.stopPropagation(); summarizeSession(${session.id}, this)">
-                                        Generate
-                                    </button>
-                                ` : ''}
-                            </div>
-                            ${session.summary ? `
-                                <div class="summary-details" id="summary-details-${session.id}">
-                                    <div class="summary-details-grid">
-                                        <div class="summary-detail-item">
-                                            <span class="summary-detail-label">Model</span>
-                                            <span class="summary-detail-value model">${session.model_used || 'Unknown'}</span>
-                                        </div>
-                                        <div class="summary-detail-item">
-                                            <span class="summary-detail-label">Inference Time</span>
-                                            <span class="summary-detail-value">${inferenceTimeStr}</span>
-                                        </div>
-                                        <div class="summary-detail-item">
-                                            <span class="summary-detail-label">Screenshots Used</span>
-                                            <span class="summary-detail-value">${session.screenshot_ids_used ? session.screenshot_ids_used.length : sampledCount} of ${session.screenshot_count}</span>
-                                        </div>
-                                        <div class="summary-detail-item">
-                                            <span class="summary-detail-label">Unique Windows</span>
-                                            <span class="summary-detail-value">${session.unique_windows}</span>
-                                        </div>
-                                    </div>
-                                    ${session.screenshot_ids_used && session.screenshot_ids_used.length > 0 ? `
-                                        <div class="summary-screenshots-used">
-                                            <div class="summary-detail-label" style="margin-top: 12px; margin-bottom: 8px;">Screenshots Used in Summary:</div>
-                                            <div class="summary-screenshots-grid">
-                                                ${session.screenshot_ids_used.map(id => `
-                                                    <img
-                                                        src="/screenshot/${id}"
-                                                        class="summary-screenshot-thumb screenshot-img"
-                                                        data-id="${id}"
-                                                        title="Screenshot #${id}"
-                                                    >
-                                                `).join('')}
-                                            </div>
-                                        </div>
-                                    ` : ''}
-                                    ${session.prompt_text ? `
-                                        <div class="summary-prompt">
-                                            <div class="summary-prompt-header">
-                                                <span class="summary-prompt-label">API Request Details</span>
-                                            </div>
-                                            <pre class="summary-prompt-content visible">${escapeHtml(session.prompt_text)}</pre>
-                                        </div>
-                                    ` : ''}
-                                </div>
-                            ` : ''}
-                        </div>
-                        <div class="session-screenshots" id="session-screenshots-${session.id}">
-                            <div class="loading"><div class="spinner"></div></div>
-                        </div>
-                    </div>
-                `;
-            });
-
-            html += '</div>';
-            detailContent.innerHTML = html;
-
-            return true;
-        }
-
-        // Toggle session expansion to show screenshots
-        async function toggleSessionExpand(sessionId) {
-            const card = document.querySelector(`[data-session-id="${sessionId}"]`);
-            if (!card) return;
-
-            const isExpanded = card.classList.contains('expanded');
-
-            if (isExpanded) {
-                card.classList.remove('expanded');
             } else {
-                card.classList.add('expanded');
-
-                // Load screenshots if not already loaded
-                const container = document.getElementById(`session-screenshots-${sessionId}`);
-                if (container && container.querySelector('.loading')) {
-                    await loadSessionScreenshots(sessionId, container);
+                // Normal click
+                if (checkbox.checked) {
+                    state.selectedSummaries.add(summaryId);
+                    row.classList.add('selected');
+                } else {
+                    state.selectedSummaries.delete(summaryId);
+                    row.classList.remove('selected');
                 }
+            }
+
+            state.lastClickedCheckboxIndex = currentIndex;
+            updateBulkActionBar();
+        }
+
+        // Toggle select all
+        function toggleSelectAll(event) {
+            event.stopPropagation();
+            const selectAll = event.target.checked;
+            const checkboxes = document.querySelectorAll('.summaries-table tbody .summary-checkbox');
+
+            checkboxes.forEach(checkbox => {
+                const summaryId = parseInt(checkbox.dataset.id);
+                const row = checkbox.closest('tr');
+
+                checkbox.checked = selectAll;
+                if (selectAll) {
+                    state.selectedSummaries.add(summaryId);
+                    row.classList.add('selected');
+                } else {
+                    state.selectedSummaries.delete(summaryId);
+                    row.classList.remove('selected');
+                }
+            });
+
+            updateBulkActionBar();
+        }
+
+        // Clear selection
+        function clearSelection() {
+            state.selectedSummaries.clear();
+            document.querySelectorAll('.summaries-table tbody tr').forEach(row => {
+                row.classList.remove('selected');
+            });
+            document.querySelectorAll('.summaries-table .summary-checkbox').forEach(cb => {
+                cb.checked = false;
+            });
+            updateBulkActionBar();
+        }
+
+        // Update bulk action bar visibility
+        function updateBulkActionBar() {
+            const bar = document.getElementById('bulkActionBar');
+            const countEl = document.getElementById('selectedCount');
+            const count = state.selectedSummaries.size;
+
+            if (count > 0) {
+                bar.classList.add('visible');
+                countEl.textContent = count;
+            } else {
+                bar.classList.remove('visible');
+            }
+
+            // Update select all checkbox
+            const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+            const totalRows = document.querySelectorAll('.summaries-table tbody tr').length;
+            if (selectAllCheckbox) {
+                selectAllCheckbox.checked = count === totalRows && totalRows > 0;
+                selectAllCheckbox.indeterminate = count > 0 && count < totalRows;
             }
         }
 
-        // Load screenshots for a specific session
-        async function loadSessionScreenshots(sessionId, container) {
-            try {
-                const response = await fetch(`/api/sessions/${sessionId}/screenshots?per_page=200`);
-                const data = await response.json();
+        // Bulk regenerate selected summaries
+        async function bulkRegenerate() {
+            const ids = Array.from(state.selectedSummaries);
+            if (ids.length === 0) return;
 
-                if (data.error) {
-                    container.innerHTML = '<div class="empty-state"><p>Failed to load screenshots</p></div>';
-                    return;
-                }
-
-                if (data.screenshots.length === 0) {
-                    container.innerHTML = '<div class="empty-state"><p>No screenshots in this session</p></div>';
-                    return;
-                }
-
-                // Store screenshots for this session for modal navigation
-                container.dataset.screenshots = JSON.stringify(data.screenshots);
-
-                container.innerHTML = data.screenshots.map(s => {
-                    const time = new Date(s.timestamp * 1000).toLocaleTimeString();
-                    return `
-                        <div class="screenshot-card">
-                            <img
-                                src="${s.filepath}"
-                                alt="Screenshot at ${time}"
-                                class="screenshot-img session-screenshot"
-                                loading="lazy"
-                                data-id="${s.id}"
-                                data-session-id="${sessionId}"
-                            >
-                            <div class="screenshot-meta">
-                                <div class="screenshot-time">${time}</div>
-                                <div class="screenshot-app">
-                                    <span class="app-badge">${s.app_name || 'Unknown'}</span>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-
-            } catch (error) {
-                console.error('Failed to load session screenshots:', error);
-                container.innerHTML = '<div class="empty-state"><p>Failed to load screenshots</p></div>';
-            }
-        }
-
-        // Summarize a specific session
-        async function summarizeSession(sessionId, buttonElement = null) {
-            // Find the button if not passed
-            if (!buttonElement) {
-                buttonElement = document.querySelector(`[data-session-id="${sessionId}"] .generate-btn`);
+            if (!confirm(`Regenerate ${ids.length} selected ${ids.length === 1 ? 'summary' : 'summaries'}?`)) {
+                return;
             }
 
-            // Show loading state immediately
-            if (buttonElement) {
-                buttonElement.classList.add('loading');
-                buttonElement.disabled = true;
-                buttonElement.innerHTML = '<span class="spinner-small"></span> Generating...';
-            }
-
-            try {
-                const response = await fetch(`/api/sessions/${sessionId}/summarize`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({})
-                });
-
-                const data = await response.json();
-
-                if (data.status === 'started') {
-                    // Poll for completion
-                    pollSessionSummaryStatus(sessionId);
-                } else if (data.status === 'already_summarized') {
-                    // Refresh the display
-                    if (state.selectedDate) {
-                        await loadDayData(state.selectedDate);
-                    }
-                } else if (data.error) {
-                    // Show error and reset button
-                    console.error('Summarization error:', data.error);
-                    if (buttonElement) {
-                        buttonElement.classList.remove('loading');
-                        buttonElement.disabled = false;
-                        buttonElement.innerHTML = 'Generate';
-                    }
-                }
-            } catch (error) {
-                console.error('Failed to start session summarization:', error);
-                // Reset button on error
-                if (buttonElement) {
-                    buttonElement.classList.remove('loading');
-                    buttonElement.disabled = false;
-                    buttonElement.innerHTML = 'Generate';
-                }
-            }
-        }
-
-        // Poll for session summary completion (for single session Generate button)
-        function pollSessionSummaryStatus(sessionId) {
-            const interval = setInterval(async () => {
+            // Queue each for regeneration
+            for (const id of ids) {
                 try {
-                    const response = await fetch(`/api/sessions/${sessionId}/summarize/status`);
-                    const status = await response.json();
-
-                    if (!status.running) {
-                        clearInterval(interval);
-                        // Update just this session's UI without full reload
-                        await updateSessionInList(sessionId);
-                    }
+                    await fetch(`/api/threshold-summaries/${id}/regenerate`, { method: 'POST' });
                 } catch (error) {
-                    console.error('Failed to poll session status:', error);
-                    clearInterval(interval);
-                }
-            }, 2000);
-        }
-
-        // Wait for a session summary to complete (returns Promise)
-        function waitForSessionSummary(sessionId) {
-            return new Promise((resolve, reject) => {
-                const interval = setInterval(async () => {
-                    try {
-                        const response = await fetch(`/api/sessions/${sessionId}/summarize/status`);
-                        const status = await response.json();
-
-                        if (!status.running) {
-                            clearInterval(interval);
-                            resolve(status);
-                        }
-                    } catch (error) {
-                        clearInterval(interval);
-                        reject(error);
-                    }
-                }, 2000);
-            });
-        }
-
-        // Update a single session in the list without full reload
-        async function updateSessionInList(sessionId) {
-            try {
-                const response = await fetch(`/api/sessions/${sessionId}`);
-                const session = await response.json();
-
-                const sessionCard = document.querySelector(`[data-session-id="${sessionId}"]`);
-                if (sessionCard && session.summary) {
-                    // Update status badge
-                    const statusBadge = sessionCard.querySelector('.session-status');
-                    if (statusBadge) {
-                        statusBadge.className = 'session-status summarized';
-                        statusBadge.textContent = 'Summarized';
-                    }
-
-                    // Update summary preview
-                    const summaryPreview = sessionCard.querySelector('.session-summary-preview');
-                    if (summaryPreview) {
-                        summaryPreview.classList.remove('no-summary');
-                        summaryPreview.innerHTML = `
-                            <span style="flex: 1;">${session.summary}</span>
-                            <span class="info-icon" style="flex-shrink: 0;">?
-                                <span class="info-tooltip">${session.inference_ms ? `Generated in ${(session.inference_ms / 1000).toFixed(1)}s using ${session.model || 'AI'}` : 'AI-generated summary'}</span>
-                            </span>
-                        `;
-                    }
-
-                    // Remove Generate button if present
-                    const generateBtn = sessionCard.querySelector('.generate-btn');
-                    if (generateBtn) {
-                        generateBtn.remove();
-                    }
-                }
-
-                // Update the pending count in sessions summary
-                updatePendingCount();
-            } catch (error) {
-                console.error('Failed to update session in list:', error);
-            }
-        }
-
-        // Update the pending count display
-        function updatePendingCount() {
-            const sessionCards = document.querySelectorAll('[data-session-id]');
-            let pendingCount = 0;
-            sessionCards.forEach(card => {
-                const status = card.querySelector('.session-status');
-                if (status && status.classList.contains('pending')) {
-                    pendingCount++;
-                }
-            });
-
-            // Update or hide the "Summarize pending" button
-            const summaryDiv = document.querySelector('.sessions-summary');
-            if (summaryDiv) {
-                const existingBtn = summaryDiv.querySelector('.generate-btn');
-                if (pendingCount === 0 && existingBtn) {
-                    existingBtn.remove();
-                } else if (existingBtn && pendingCount > 0) {
-                    existingBtn.textContent = `Summarize ${pendingCount} pending`;
+                    console.error(`Failed to queue regeneration for ${id}:`, error);
                 }
             }
+
+            alert(`Queued ${ids.length} ${ids.length === 1 ? 'summary' : 'summaries'} for regeneration.`);
+            clearSelection();
+
+            // Reload after a delay
+            setTimeout(() => {
+                if (state.selectedDate) {
+                    loadDayData(state.selectedDate);
+                }
+            }, 3000);
         }
 
-        // Summarize all pending sessions for a date
-        async function summarizePendingSessions(dateStr, buttonElement = null) {
-            // Find the button if not passed
-            if (!buttonElement) {
-                buttonElement = document.querySelector('.sessions-summary .generate-btn');
+        // Bulk delete selected summaries
+        async function bulkDelete() {
+            const ids = Array.from(state.selectedSummaries);
+            if (ids.length === 0) return;
+
+            if (!confirm(`Delete ${ids.length} selected ${ids.length === 1 ? 'summary' : 'summaries'}? This cannot be undone.`)) {
+                return;
             }
 
-            try {
-                const sessionsData = await loadSessions(dateStr);
-                if (!sessionsData) return;
-
-                const pendingSessions = sessionsData.sessions.filter(s => !s.summary && s.end_time);
-                const total = pendingSessions.length;
-
-                if (total === 0) {
-                    if (buttonElement) buttonElement.remove();
-                    return;
+            let deleted = 0;
+            for (const id of ids) {
+                try {
+                    const response = await fetch(`/api/threshold-summaries/${id}`, { method: 'DELETE' });
+                    if (response.ok) deleted++;
+                } catch (error) {
+                    console.error(`Failed to delete ${id}:`, error);
                 }
+            }
 
-                // Show loading state immediately
-                if (buttonElement) {
-                    buttonElement.disabled = true;
-                    buttonElement.innerHTML = `<span class="spinner-small"></span> Summarizing 0/${total}...`;
-                }
+            alert(`Deleted ${deleted} of ${ids.length} ${ids.length === 1 ? 'summary' : 'summaries'}.`);
+            clearSelection();
 
-                // Process sessions sequentially
-                for (let i = 0; i < pendingSessions.length; i++) {
-                    const session = pendingSessions[i];
-
-                    // Update progress on button
-                    if (buttonElement) {
-                        buttonElement.innerHTML = `<span class="spinner-small"></span> Summarizing ${i + 1}/${total}...`;
-                    }
-
-                    // Update individual session's Generate button if visible
-                    const sessionBtn = document.querySelector(`[data-session-id="${session.id}"] .generate-btn`);
-                    if (sessionBtn) {
-                        sessionBtn.classList.add('loading');
-                        sessionBtn.disabled = true;
-                        sessionBtn.innerHTML = '<span class="spinner-small"></span> Generating...';
-                    }
-
-                    // Start summarization
-                    const response = await fetch(`/api/sessions/${session.id}/summarize`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({})
-                    });
-
-                    const data = await response.json();
-
-                    if (data.status === 'started') {
-                        // Wait for this session to complete before moving to next
-                        await waitForSessionSummary(session.id);
-                    }
-
-                    // Update this session in the UI immediately
-                    await updateSessionInList(session.id);
-                }
-
-                // All done - remove the button
-                if (buttonElement) {
-                    buttonElement.remove();
-                }
-
-            } catch (error) {
-                console.error('Failed to summarize pending sessions:', error);
-                // Reset button on error
-                if (buttonElement) {
-                    buttonElement.disabled = false;
-                    buttonElement.innerHTML = 'Summarize pending';
-                }
+            // Reload
+            if (state.selectedDate) {
+                loadDayData(state.selectedDate);
             }
         }
 
         // ==================== Threshold Summaries ====================
 
-        // Render the threshold summaries panel
+        // Format hour as AM/PM
+        function formatHourAMPM(hour) {
+            const ampm = hour >= 12 ? 'PM' : 'AM';
+            const h = hour % 12 || 12;
+            return `${h}:00 ${ampm}`;
+        }
+
+        // Render the threshold summaries panel with hourly sections
         function renderThresholdSummaries() {
             const summaries = state.thresholdSummaries || [];
-            const pendingCount = state.pendingCount || 0;
-            const threshold = state.threshold || 10;
+            const hourlyData = state.hourlyData || [];
 
             // Find or create the threshold summaries container
             let container = document.getElementById('thresholdSummariesPanel');
             if (!container) {
-                // Create and insert after sessions panel
-                const sessionsPanel = document.getElementById('sessionsPanel');
-                if (sessionsPanel) {
-                    container = document.createElement('div');
-                    container.id = 'thresholdSummariesPanel';
-                    container.className = 'threshold-summaries-panel';
-                    sessionsPanel.parentNode.insertBefore(container, sessionsPanel.nextSibling);
-                } else {
-                    // Insert at end of detail content
-                    const detailContent = document.getElementById('detailContent');
-                    container = document.createElement('div');
-                    container.id = 'thresholdSummariesPanel';
-                    container.className = 'threshold-summaries-panel';
-                    detailContent.appendChild(container);
+                const detailContent = document.getElementById('detailContent');
+                container = document.createElement('div');
+                container.id = 'thresholdSummariesPanel';
+                container.className = 'threshold-summaries-panel';
+                detailContent.appendChild(container);
+            }
+
+            // Group summaries by hour
+            const summaryGroups = {};
+            summaries.forEach(summary => {
+                const startDate = new Date(summary.start_time);
+                const hour = startDate.getHours();
+                if (!summaryGroups[hour]) {
+                    summaryGroups[hour] = [];
                 }
+                summaryGroups[hour].push(summary);
+            });
+
+            // Get all hours with activity from hourlyData
+            const hoursWithActivity = hourlyData
+                .filter(h => h.screenshot_count > 0)
+                .map(h => ({ hour: h.hour, count: h.screenshot_count }))
+                .sort((a, b) => a.hour - b.hour);
+
+            if (hoursWithActivity.length === 0) {
+                container.innerHTML = `
+                    <div class="no-summaries">
+                        No activity recorded for this day.
+                    </div>
+                `;
+                return;
             }
 
             // Build the HTML
             let html = `
-                <h3>
-                    AI Summaries
-                    <span class="info-icon">?
-                        <span class="info-tooltip">Summaries are automatically generated every ${threshold} screenshots. You can regenerate them with different settings or delete them.</span>
-                    </span>
-                </h3>
+                <div class="bulk-action-bar" id="bulkActionBar">
+                    <span class="selected-count"><span id="selectedCount">0</span> selected</span>
+                    <div class="bulk-actions">
+                        <button class="btn-bulk" onclick="bulkRegenerate()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                            Regenerate
+                        </button>
+                        <button class="btn-bulk danger" onclick="bulkDelete()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                            Delete
+                        </button>
+                        <button class="btn-bulk btn-cancel" onclick="clearSelection()">Cancel</button>
+                    </div>
+                </div>
             `;
 
-            // Pending indicator
-            if (pendingCount > 0) {
-                html += `
-                    <div class="pending-indicator">
-                        <span class="pending-count">${pendingCount}</span> screenshots pending
-                        <span class="pending-threshold">(${threshold} triggers summary)</span>
-                    </div>
-                `;
-            }
+            // Table with hourly sections
+            html += `
+                <div class="summaries-table-wrapper">
+                    <table class="summaries-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 40px;"><input type="checkbox" class="summary-checkbox" id="selectAllCheckbox" onclick="toggleSelectAll(event)"></th>
+                                <th>Time</th>
+                                <th>Dur</th>
+                                <th>Project</th>
+                                <th>Summary</th>
+                                <th style="width: 80px;">Screens</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
 
-            if (summaries.length === 0) {
+            // Only show hours that have summaries (skip empty hours)
+            hoursWithActivity.forEach(({ hour, count }) => {
+                const hourSummaries = summaryGroups[hour] || [];
+                if (hourSummaries.length === 0) return; // Skip hours with no summaries
+
+                const hourLabel = formatHourAMPM(hour);
+                const summarizedCount = hourSummaries.reduce((sum, s) => sum + s.screenshot_count, 0);
+
+                // Hour section header row (only for hours with summaries)
                 html += `
-                    <div class="no-summaries">
-                        No AI summaries for this day yet.
-                        ${pendingCount >= threshold ? '<br><small>A summary will be generated shortly...</small>' : ''}
-                    </div>
+                    <tr class="hour-section-header" data-hour="${hour}" id="hour-section-${hour}">
+                        <td colspan="6">
+                            <div class="hour-section-label">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                                <span class="hour-time">${hourLabel}</span>
+                                <span class="hour-count">${hourSummaries.length} ${hourSummaries.length === 1 ? 'summary' : 'summaries'} · ${summarizedCount} screenshots</span>
+                            </div>
+                        </td>
+                    </tr>
                 `;
-            } else {
-                html += '<div class="threshold-summary-list">';
-                summaries.forEach(summary => {
-                    const startTime = new Date(summary.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-                    const endTime = new Date(summary.end_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-                    const inferenceTime = summary.inference_time_ms ? `${(summary.inference_time_ms / 1000).toFixed(1)}s` : '';
-                    const isRegenerated = summary.regenerated_from !== null;
+
+                // Summaries for this hour
+                hourSummaries.forEach(summary => {
+                    const startDate = new Date(summary.start_time);
+                    const endDate = new Date(summary.end_time);
+                    const startTime = startDate.toLocaleTimeString([], {hour: 'numeric', minute:'2-digit', hour12: true});
+                    const durationMs = endDate - startDate;
+                    const durationMins = Math.round(durationMs / 60000);
+                    const durationStr = durationMins < 1 ? '<1m' : `${durationMins}m`;
+                    const project = summary.project || 'unknown';
 
                     html += `
-                        <div class="threshold-summary-block" data-summary-id="${summary.id}">
-                            <div class="summary-header">
-                                <span class="time-range">${startTime} - ${endTime}</span>
-                                <span class="screenshot-count">${summary.screenshot_count} screenshots</span>
-                                ${isRegenerated ? '<span class="regenerated-badge">Regenerated</span>' : ''}
-                                <div class="summary-actions">
-                                    <button class="btn-icon" onclick="regenerateSummary(${summary.id})" title="Regenerate with current settings">
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                                    </button>
-                                    <button class="btn-icon" onclick="showSummaryHistory(${summary.id})" title="View versions">
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                                    </button>
-                                    <button class="btn-icon btn-danger" onclick="deleteSummary(${summary.id})" title="Delete summary">
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="summary-text">${summary.summary}</div>
-                            <div class="summary-meta">
-                                <span class="model">${summary.model_used || 'Unknown model'}</span>
-                                ${inferenceTime ? `<span class="inference-time">${inferenceTime}</span>` : ''}
-                            </div>
-                        </div>
+                        <tr data-summary-id="${summary.id}" data-hour="${hour}" onclick="handleRowClick(event, ${summary.id})">
+                            <td onclick="event.stopPropagation()">
+                                <input type="checkbox" class="summary-checkbox" data-id="${summary.id}" onclick="handleCheckboxClick(event, ${summary.id})">
+                            </td>
+                            <td class="summary-time">${startTime}</td>
+                            <td class="summary-duration">${durationStr}</td>
+                            <td><span class="project-badge" style="background: ${projectColor(project)}">${project}</span></td>
+                            <td class="summary-text-cell" title="${summary.summary}">${summary.summary}</td>
+                            <td class="summary-screens">
+                                <span class="screen-count" onclick="event.stopPropagation(); viewSummaryScreenshots(${summary.id})" title="View screenshots">${summary.screenshot_count}</span>
+                            </td>
+                        </tr>
                     `;
                 });
-                html += '</div>';
-            }
+            });
+
+            html += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
 
             container.innerHTML = html;
+            state.selectedSummaries = new Set();
+
+            // Set up scroll observer for chart highlighting
+            setupScrollObserver();
+
+            // Track current highlighted hour
+            state.highlightedHour = null;
+        }
+
+        // View screenshots for an hour without summaries
+        async function viewHourScreenshots(hour) {
+            if (!state.selectedDate) return;
+
+            try {
+                const response = await fetch(`/api/screenshots/${state.selectedDate}/${hour}`);
+                const data = await response.json();
+
+                if (data.error) {
+                    alert('Failed to load screenshots: ' + data.error);
+                    return;
+                }
+
+                if (data.screenshots && data.screenshots.length > 0) {
+                    // Use the existing modal system with navigation
+                    window.showModalWithScreenshots(data.screenshots[0].id, data.screenshots);
+                } else {
+                    alert('No screenshots for this hour');
+                }
+            } catch (error) {
+                console.error('Failed to load screenshots:', error);
+            }
+        }
+
+        // View screenshots for a specific summary
+        async function viewSummaryScreenshots(summaryId) {
+            try {
+                const response = await fetch(`/api/threshold-summaries/${summaryId}`);
+                const data = await response.json();
+
+                if (data.error) {
+                    alert('Failed to load summary: ' + data.error);
+                    return;
+                }
+
+                const screenshotIds = data.screenshot_ids || [];
+                if (screenshotIds.length === 0) {
+                    alert('No screenshots associated with this summary');
+                    return;
+                }
+
+                // Fetch screenshot details
+                const screenshotsResponse = await fetch(`/api/screenshots/batch?ids=${screenshotIds.join(',')}`);
+                const screenshotsData = await screenshotsResponse.json();
+
+                if (screenshotsData.screenshots && screenshotsData.screenshots.length > 0) {
+                    // Use the existing modal system with navigation
+                    window.showModalWithScreenshots(screenshotsData.screenshots[0].id, screenshotsData.screenshots);
+                } else {
+                    alert('No screenshots available');
+                }
+            } catch (error) {
+                console.error('Failed to load screenshots:', error);
+            }
+        }
+
+        // Set up IntersectionObserver to highlight chart bar on scroll
+        function setupScrollObserver() {
+            const tableWrapper = document.querySelector('.summaries-table-wrapper');
+            if (!tableWrapper) return;
+
+            const hourHeaders = document.querySelectorAll('.hour-section-header');
+            if (hourHeaders.length === 0) return;
+
+            // Clean up previous observer
+            if (state.scrollObserver) {
+                state.scrollObserver.disconnect();
+            }
+
+            // Create observer for hour sections
+            const observer = new IntersectionObserver((entries) => {
+                // Find the topmost visible section
+                let topmostEntry = null;
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        if (!topmostEntry || entry.boundingClientRect.top < topmostEntry.boundingClientRect.top) {
+                            topmostEntry = entry;
+                        }
+                    }
+                });
+
+                if (topmostEntry) {
+                    const hour = parseInt(topmostEntry.target.dataset.hour);
+                    if (state.highlightedHour !== hour) {
+                        state.highlightedHour = hour;
+                        highlightChartBar(hour);
+                    }
+                }
+            }, {
+                root: tableWrapper,
+                rootMargin: '0px 0px -80% 0px',
+                threshold: 0.1
+            });
+
+            hourHeaders.forEach(header => observer.observe(header));
+
+            // Store observer for cleanup
+            state.scrollObserver = observer;
+        }
+
+        // Highlight a bar in the hourly chart
+        function highlightChartBar(hour) {
+            if (!state.chart) return;
+
+            // Find the index for this hour
+            const hourIndex = state.chart.data.labels.findIndex(
+                label => parseInt(label) === hour
+            );
+
+            if (hourIndex === -1) return;
+
+            // Create color arrays - highlighted bar is brighter, others are dimmed
+            const colors = state.chart.data.labels.map((_, i) => {
+                if (i === hourIndex) {
+                    return 'rgba(88, 166, 255, 1)';  // Bright blue for highlighted
+                }
+                return 'rgba(88, 166, 255, 0.4)';  // Dimmed for others
+            });
+
+            const borderColors = state.chart.data.labels.map((_, i) => {
+                if (i === hourIndex) {
+                    return 'rgba(31, 111, 235, 1)';  // Strong border for highlighted
+                }
+                return 'rgba(31, 111, 235, 0.3)';  // Dimmed border for others
+            });
+
+            state.chart.data.datasets[0].backgroundColor = colors;
+            state.chart.data.datasets[0].borderColor = borderColors;
+            state.chart.update('none'); // Update without animation
+        }
+
+        // Reset chart bar highlighting
+        function resetChartHighlight() {
+            if (!state.chart) return;
+
+            const theme = getThemeColors();
+            state.chart.data.datasets[0].backgroundColor = theme.accent;
+            state.chart.data.datasets[0].borderColor = theme.accentStrong;
+            state.chart.update('none');
+            state.highlightedHour = null;
+        }
+
+        // Trigger summarization of all pending screenshots
+        async function triggerSummarization() {
+            // Disable the generate button while processing
+            const generateBtn = document.getElementById('btnGenerateMissing');
+            const originalBtnHtml = generateBtn ? generateBtn.innerHTML : '';
+
+            if (generateBtn) {
+                generateBtn.disabled = true;
+                generateBtn.innerHTML = `
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                    Generating...
+                `;
+            }
+
+            const resetButton = () => {
+                if (generateBtn) {
+                    generateBtn.disabled = false;
+                    generateBtn.innerHTML = `
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                        Generate Missing
+                    `;
+                }
+            };
+
+            try {
+                const response = await fetch('/api/threshold-summaries/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    alert('Failed to trigger summarization: ' + data.error);
+                    resetButton();
+                    return;
+                }
+
+                if (data.status === 'no_pending') {
+                    alert('No unsummarized screenshots to process');
+                    resetButton();
+                    return;
+                }
+
+                // Poll for completion then refresh
+                pollForSummarization();
+            } catch (error) {
+                console.error('Failed to trigger summarization:', error);
+                alert('Failed to trigger summarization');
+                resetButton();
+            }
+        }
+
+        // Poll worker status until summarization is complete
+        async function pollForSummarization() {
+            const pollInterval = setInterval(async () => {
+                try {
+                    const response = await fetch('/api/threshold-summaries/worker-status');
+                    const data = await response.json();
+
+                    if (data.queue_size === 0 && !data.current_task) {
+                        clearInterval(pollInterval);
+                        // Refresh the view
+                        if (state.selectedDate) {
+                            loadDayData(state.selectedDate);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error polling worker status:', error);
+                    clearInterval(pollInterval);
+                }
+            }, 2000);
+        }
+
+        // Scroll to hour section when chart bar is clicked
+        function scrollToHourSection(hour) {
+            const section = document.getElementById(`hour-section-${hour}`);
+            if (section) {
+                section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                // Immediately highlight the bar
+                state.highlightedHour = hour;
+                highlightChartBar(hour);
+            }
         }
 
         // Regenerate a summary with current settings

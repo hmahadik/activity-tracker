@@ -59,7 +59,7 @@
         }
 
         .container {
-            max-width: 1200px;
+            max-width: 1600px;
             margin: 0 auto;
             padding: 20px;
         }
@@ -577,7 +577,7 @@
         }
 
         .save-bar-content {
-            max-width: 1200px;
+            max-width: 1600px;
             margin: 0 auto;
             display: flex;
             justify-content: space-between;
@@ -706,6 +706,195 @@
 
         @keyframes spin {
             to { transform: rotate(360deg); }
+        }
+
+        /* Content Mode Checkboxes */
+        .content-mode-checkboxes {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 10px 12px;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .checkbox-label:hover {
+            border-color: var(--accent);
+        }
+
+        .checkbox-label input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            margin-top: 2px;
+            accent-color: var(--accent);
+            cursor: pointer;
+        }
+
+        .checkbox-text {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .checkbox-text strong {
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: var(--text);
+        }
+
+        .checkbox-text small {
+            font-size: 0.75rem;
+            color: var(--muted);
+        }
+
+        /* Advanced Settings Toggle */
+        .advanced-settings-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 0;
+            cursor: pointer;
+            color: var(--accent);
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+
+        .advanced-settings-toggle:hover {
+            color: var(--accent-soft);
+        }
+
+        .collapse-arrow {
+            width: 16px;
+            height: 16px;
+            transition: transform 0.2s;
+        }
+
+        .collapse-arrow.expanded {
+            transform: rotate(90deg);
+        }
+
+        /* Advanced Settings Container */
+        .advanced-settings {
+            overflow: hidden;
+            transition: max-height 0.3s ease, opacity 0.3s ease;
+            border-top: 1px solid var(--border);
+            padding-top: 12px;
+        }
+
+        .advanced-settings.collapsed {
+            max-height: 0;
+            opacity: 0;
+            padding-top: 0;
+            border-top: none;
+        }
+
+        /* Underlying Settings (from preset) */
+        .underlying-settings {
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 12px;
+            margin-top: 12px;
+        }
+
+        .underlying-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            font-size: 0.85rem;
+            color: var(--muted);
+        }
+
+        .preset-badge {
+            background: var(--accent);
+            color: var(--text-inverse);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: capitalize;
+        }
+
+        .settings-row.compact {
+            padding: 8px 0;
+        }
+
+        .settings-row.compact .settings-label h3 {
+            font-size: 0.85rem;
+        }
+
+        .computed-note {
+            font-size: 0.7rem;
+            color: var(--muted);
+            font-style: italic;
+        }
+
+        .computed-value {
+            font-size: 0.9rem;
+            color: var(--text);
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Prompt Preview */
+        .prompt-preview-section {
+            margin-top: 16px;
+            border-top: 1px solid var(--border);
+            padding-top: 16px;
+        }
+
+        .prompt-preview-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .prompt-preview-header h3 {
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: var(--text);
+        }
+
+        button.small {
+            padding: 4px 10px;
+            font-size: 0.75rem;
+        }
+
+        .prompt-preview {
+            overflow: hidden;
+            transition: max-height 0.3s ease, opacity 0.3s ease;
+        }
+
+        .prompt-preview.collapsed {
+            max-height: 0;
+            opacity: 0;
+        }
+
+        .prompt-preview pre {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 12px;
+            font-size: 0.75rem;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 300px;
+            overflow-y: auto;
+            color: var(--text);
+            line-height: 1.5;
         }
     </style>
 </head>
@@ -855,10 +1044,11 @@
                     AI Summarization
                 </h2>
 
+                <!-- Enable Toggle -->
                 <div class="settings-row">
                     <div class="settings-label">
                         <h3>Enable Summarization</h3>
-                        <p>Generate activity summaries</p>
+                        <p>Automatically generate activity summaries</p>
                     </div>
                     <div class="settings-control">
                         <label class="toggle">
@@ -868,10 +1058,11 @@
                     </div>
                 </div>
 
+                <!-- Model Selection -->
                 <div class="settings-row">
                     <div class="settings-label">
                         <h3>Model</h3>
-                        <p>Ollama model for summarization</p>
+                        <p>AI model for analysis</p>
                     </div>
                     <div class="settings-control">
                         <select id="model">
@@ -886,53 +1077,165 @@
                     </div>
                 </div>
 
+                <!-- Summary Frequency (NEW - user-friendly time-based) -->
                 <div class="settings-row">
                     <div class="settings-label">
-                        <h3>Trigger Threshold</h3>
-                        <p>Screenshots before auto-summarizing</p>
+                        <h3>Summary Frequency</h3>
+                        <p>How often to generate summaries</p>
                     </div>
                     <div class="settings-control">
-                        <input type="range" id="trigger_threshold" min="5" max="30" step="1">
-                        <span class="slider-value"><span id="trigger_threshold_value">10</span></span>
+                        <select id="frequency_minutes">
+                            <option value="5">Every 5 minutes</option>
+                            <option value="15">Every 15 minutes</option>
+                            <option value="30">Every 30 minutes</option>
+                            <option value="60">Every hour</option>
+                        </select>
                     </div>
                 </div>
 
+                <!-- Summary Quality Preset (NEW) -->
                 <div class="settings-row">
                     <div class="settings-label">
-                        <h3>Enable OCR</h3>
-                        <p>Extract text from screenshots</p>
+                        <h3>Summary Quality</h3>
+                        <p>Quick = faster, Thorough = more detailed</p>
                     </div>
                     <div class="settings-control">
-                        <label class="toggle">
-                            <input type="checkbox" id="ocr_enabled">
-                            <span class="toggle-slider"></span>
+                        <select id="quality_preset">
+                            <option value="quick">Quick</option>
+                            <option value="balanced">Balanced</option>
+                            <option value="thorough">Thorough</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Content Mode (NEW - multi-select checkboxes) -->
+                <div class="settings-row column">
+                    <div class="settings-label">
+                        <h3>Content to Include</h3>
+                        <p>What information to send to the AI</p>
+                    </div>
+                    <div class="content-mode-checkboxes">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="include_focus_context" checked>
+                            <span class="checkbox-text">
+                                <strong>App/window usage breakdown</strong>
+                                <small>Time spent per app (e.g., "VS Code: 45m, Firefox: 12m")</small>
+                            </span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="include_screenshots" checked>
+                            <span class="checkbox-text">
+                                <strong>Screenshots</strong>
+                                <small>Visual context of your screen</small>
+                            </span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="include_ocr" checked>
+                            <span class="checkbox-text">
+                                <strong>OCR text</strong>
+                                <small>Text extracted from screenshots</small>
+                            </span>
                         </label>
                     </div>
                 </div>
 
-                <div class="settings-row">
-                    <div class="settings-label">
-                        <h3>Crop to Window</h3>
-                        <p>Use cropped screenshots for OCR</p>
-                    </div>
-                    <div class="settings-control">
-                        <label class="toggle">
-                            <input type="checkbox" id="crop_to_window">
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
+                <!-- Advanced Settings (Collapsible) -->
+                <div class="advanced-settings-toggle" onclick="toggleAdvancedSettings()">
+                    <svg id="advancedArrow" class="collapse-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="9 18 15 12 9 6"></polyline>
+                    </svg>
+                    <span>Advanced Settings</span>
                 </div>
 
-                <div class="settings-row">
-                    <div class="settings-label">
-                        <h3>Include Previous Summary</h3>
-                        <p>Add context from last summary</p>
+                <div id="advancedSettings" class="advanced-settings collapsed">
+                    <!-- Ollama Host -->
+                    <div class="settings-row">
+                        <div class="settings-label">
+                            <h3>Ollama Host</h3>
+                            <p>API endpoint URL</p>
+                        </div>
+                        <div class="settings-control">
+                            <input type="text" id="ollama_host" placeholder="http://localhost:11434">
+                        </div>
                     </div>
-                    <div class="settings-control">
-                        <label class="toggle">
-                            <input type="checkbox" id="include_previous_summary">
-                            <span class="toggle-slider"></span>
-                        </label>
+
+                    <!-- Crop to Window -->
+                    <div class="settings-row">
+                        <div class="settings-label">
+                            <h3>Crop to Window</h3>
+                            <p>Focus on active window only</p>
+                        </div>
+                        <div class="settings-control">
+                            <label class="toggle">
+                                <input type="checkbox" id="crop_to_window">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Underlying Settings (Updated by Quality Preset) -->
+                    <div class="underlying-settings">
+                        <div class="underlying-header">
+                            <span>Settings from Quality Preset</span>
+                            <span class="preset-badge" id="currentPresetBadge">balanced</span>
+                        </div>
+
+                        <div class="settings-row compact">
+                            <div class="settings-label">
+                                <h3>Max Screenshots</h3>
+                            </div>
+                            <div class="settings-control">
+                                <input type="range" id="max_samples" min="3" max="20" step="1">
+                                <span class="slider-value"><span id="max_samples_value">10</span></span>
+                            </div>
+                        </div>
+
+                        <div class="settings-row compact">
+                            <div class="settings-label">
+                                <h3>Include Previous Context</h3>
+                            </div>
+                            <div class="settings-control">
+                                <label class="toggle">
+                                    <input type="checkbox" id="include_previous_summary">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="settings-row compact">
+                            <div class="settings-label">
+                                <h3>Focus-Weighted Sampling</h3>
+                            </div>
+                            <div class="settings-control">
+                                <label class="toggle">
+                                    <input type="checkbox" id="focus_weighted_sampling">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="settings-row compact">
+                            <div class="settings-label">
+                                <h3>Trigger Threshold</h3>
+                                <p class="computed-note">Computed from frequency</p>
+                            </div>
+                            <div class="settings-control">
+                                <span class="computed-value" id="trigger_threshold_display">30 screenshots</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Prompt Template Preview -->
+                    <div class="prompt-preview-section">
+                        <div class="prompt-preview-header">
+                            <h3>Prompt Template</h3>
+                            <button type="button" class="secondary small" onclick="togglePromptPreview()">
+                                <span id="promptToggleText">Show</span>
+                            </button>
+                        </div>
+                        <div id="promptPreview" class="prompt-preview collapsed">
+                            <pre id="promptTemplateText">Loading prompt template...</pre>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1249,13 +1552,27 @@
             setValue('timeout_seconds', cfg.afk.timeout_seconds);
             setValue('min_session_minutes', cfg.afk.min_session_minutes);
 
-            // Summarization
+            // Summarization - User-facing settings
             setChecked('summarization_enabled', cfg.summarization.enabled);
             setValue('model', cfg.summarization.model);
-            setValue('trigger_threshold', cfg.summarization.trigger_threshold);
-            setChecked('ocr_enabled', cfg.summarization.ocr_enabled);
+            setValue('frequency_minutes', cfg.summarization.frequency_minutes || 15);
+            setValue('quality_preset', cfg.summarization.quality_preset || 'balanced');
+
+            // Content mode checkboxes
+            setChecked('include_focus_context', cfg.summarization.include_focus_context !== false);
+            setChecked('include_screenshots', cfg.summarization.include_screenshots !== false);
+            setChecked('include_ocr', cfg.summarization.include_ocr !== false);
+
+            // Advanced settings
+            setValue('ollama_host', cfg.summarization.ollama_host);
             setChecked('crop_to_window', cfg.summarization.crop_to_window);
+            setValue('max_samples', cfg.summarization.max_samples);
             setChecked('include_previous_summary', cfg.summarization.include_previous_summary);
+            setChecked('focus_weighted_sampling', cfg.summarization.focus_weighted_sampling);
+
+            // Update computed trigger threshold display
+            updateTriggerThresholdDisplay();
+            updatePresetBadge();
 
             // Storage
             setValue('data_dir', cfg.storage.data_dir);
@@ -1629,6 +1946,145 @@
             }, 3000);
         }
 
+        // Quality preset definitions
+        const qualityPresets = {
+            quick: { max_samples: 5, include_previous_summary: false, focus_weighted_sampling: false },
+            balanced: { max_samples: 10, include_previous_summary: true, focus_weighted_sampling: true },
+            thorough: { max_samples: 15, include_previous_summary: true, focus_weighted_sampling: true }
+        };
+
+        // Apply quality preset to underlying settings
+        function applyQualityPreset(preset) {
+            const settings = qualityPresets[preset];
+            if (!settings) return;
+
+            // Update UI
+            setValue('max_samples', settings.max_samples);
+            setChecked('include_previous_summary', settings.include_previous_summary);
+            setChecked('focus_weighted_sampling', settings.focus_weighted_sampling);
+
+            // Track changes
+            trackChange('max_samples', 'summarization', 'max_samples', settings.max_samples);
+            trackChange('include_previous_summary', 'summarization', 'include_previous_summary', settings.include_previous_summary);
+            trackChange('focus_weighted_sampling', 'summarization', 'focus_weighted_sampling', settings.focus_weighted_sampling);
+
+            updatePresetBadge();
+            updatePromptTemplate();  // Preset affects include_previous_summary
+        }
+
+        // Update the preset badge display
+        function updatePresetBadge() {
+            const preset = document.getElementById('quality_preset')?.value || 'balanced';
+            const badge = document.getElementById('currentPresetBadge');
+            if (badge) badge.textContent = preset;
+        }
+
+        // Update computed trigger threshold display (display only, no tracking)
+        function updateTriggerThresholdDisplay() {
+            const frequency = parseInt(document.getElementById('frequency_minutes')?.value || 15);
+            const captureInterval = config?.capture?.interval_seconds || 30;
+            const threshold = Math.round(frequency * 60 / captureInterval);
+            const display = document.getElementById('trigger_threshold_display');
+            if (display) display.textContent = `${threshold} screenshots`;
+            return threshold;  // Return for use when tracking is needed
+        }
+
+        // Toggle advanced settings visibility
+        function toggleAdvancedSettings() {
+            const container = document.getElementById('advancedSettings');
+            const arrow = document.getElementById('advancedArrow');
+            container.classList.toggle('collapsed');
+            arrow.classList.toggle('expanded');
+        }
+
+        // Toggle prompt preview visibility
+        function togglePromptPreview() {
+            const container = document.getElementById('promptPreview');
+            const toggleText = document.getElementById('promptToggleText');
+            const isCollapsed = container.classList.toggle('collapsed');
+            toggleText.textContent = isCollapsed ? 'Show' : 'Hide';
+
+            // Update prompt template when shown
+            if (!isCollapsed) {
+                updatePromptTemplate();
+            }
+        }
+
+        // Build prompt template dynamically based on selected content options
+        function updatePromptTemplate() {
+            const includeFocus = document.getElementById('include_focus_context')?.checked;
+            const includeScreenshots = document.getElementById('include_screenshots')?.checked;
+            const includeOcr = document.getElementById('include_ocr')?.checked;
+            const includePrevious = document.getElementById('include_previous_summary')?.checked;
+
+            let parts = ['You are summarizing a developer\'s work activity.', ''];
+
+            if (includePrevious) {
+                parts.push('[Previous context: {previous_summary}]');
+                parts.push('');
+            }
+
+            if (includeFocus) {
+                parts.push('## Time Breakdown (from focus tracking)');
+                parts.push('- VS Code (daemon.py): 45m 23s [longest: 18m]');
+                parts.push('- Firefox (GitHub PR #1234): 12m 5s [3 visits]');
+                parts.push('- Terminal: 8m 12s [5 visits]');
+                parts.push('');
+                parts.push('Total tracked: 65m, 12 context switches');
+                parts.push('');
+            }
+
+            if (includeOcr) {
+                parts.push('## Window Content (OCR)');
+                parts.push('{ocr_section}');
+                parts.push('');
+            }
+
+            if (includeScreenshots) {
+                parts.push('## Screenshots');
+                parts.push('{num_screenshots} screenshots attached showing actual screen content.');
+                parts.push('');
+            }
+
+            // Build the "based on" clause dynamically
+            let sources = [];
+            if (includeFocus) sources.push('the time breakdown');
+            if (includeOcr) sources.push('OCR text');
+            if (includeScreenshots) sources.push('screenshots');
+
+            const basis = sources.length > 0 ? sources.join(', ') : 'the available data';
+
+            parts.push(`Based on ${basis}, write ONE sentence (max 25 words) describing the PRIMARY activity.`);
+            parts.push('');
+            parts.push('IMPORTANT: Output ONLY the summary sentence. No explanation, no reasoning, no preamble.');
+            parts.push('');
+            parts.push('Guidelines:');
+            parts.push('- Focus on where the most time was spent');
+            parts.push('- Use specific project names, filenames, or URLs visible in the content');
+            parts.push('- Format: "[Action verb] [what] in/for [project/context]"');
+            parts.push('- If multiple distinct activities, mention the dominant one');
+            parts.push('- Do NOT assume different apps/windows are related unless clearly the same project');
+            parts.push('');
+            parts.push('Good examples:');
+            parts.push('Implementing window focus tracking in activity-tracker daemon.py (45 min)');
+            parts.push('Reviewing PR #1234 for authentication service and responding to comments');
+            parts.push('Debugging API endpoint issues in Acusight backend with Docker logs');
+            parts.push('');
+            parts.push('Be specific. Avoid generic descriptions like "coding" or "browsing".');
+
+            const template = parts.join('\n');
+            document.getElementById('promptTemplateText').textContent = template;
+
+            // Add visual indicator for disabled sections
+            const preEl = document.getElementById('promptTemplateText');
+            if (!includeFocus && !includeScreenshots && !includeOcr) {
+                preEl.style.color = 'var(--danger)';
+                preEl.textContent = '⚠️ Warning: No content selected! At least one option must be enabled.\n\n' + template;
+            } else {
+                preEl.style.color = '';
+            }
+        }
+
         // Event listeners for all inputs
         document.addEventListener('DOMContentLoaded', () => {
             loadConfig();
@@ -1638,13 +2094,12 @@
 
             // Range inputs
             ['interval_seconds', 'quality', 'timeout_seconds', 'min_session_minutes',
-             'trigger_threshold', 'max_days_retention', 'max_gb_storage'].forEach(id => {
+             'max_days_retention', 'max_gb_storage', 'max_samples'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) {
                     el.addEventListener('input', (e) => {
                         updateSliderValue(id, e.target.value);
                         const { section, key } = getConfigInfo(id);
-                        // Use parseFloat for max_gb_storage, parseInt for others
                         const value = id === 'max_gb_storage'
                             ? parseFloat(e.target.value)
                             : parseInt(e.target.value);
@@ -1654,18 +2109,26 @@
             });
 
             // Checkboxes
+            const promptAffectingCheckboxes = ['include_focus_context', 'include_screenshots', 'include_ocr', 'include_previous_summary'];
+
             ['capture_active_monitor_only', 'summarization_enabled', 'include_previous_summary',
-             'ocr_enabled', 'crop_to_window'].forEach(id => {
+             'crop_to_window', 'focus_weighted_sampling',
+             'include_focus_context', 'include_screenshots', 'include_ocr'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) {
                     el.addEventListener('change', (e) => {
                         const { section, key } = getConfigInfo(id);
                         trackChange(id, section, key, e.target.checked);
+
+                        // Update prompt template preview if this checkbox affects it
+                        if (promptAffectingCheckboxes.includes(id)) {
+                            updatePromptTemplate();
+                        }
                     });
                 }
             });
 
-            // Select inputs
+            // Select inputs (basic)
             ['format', 'model'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) {
@@ -1675,6 +2138,33 @@
                     });
                 }
             });
+
+            // Frequency dropdown - compute trigger threshold
+            const frequencyEl = document.getElementById('frequency_minutes');
+            if (frequencyEl) {
+                frequencyEl.addEventListener('change', (e) => {
+                    trackChange('frequency_minutes', 'summarization', 'frequency_minutes', parseInt(e.target.value));
+                    const threshold = updateTriggerThresholdDisplay();
+                    trackChange('trigger_threshold', 'summarization', 'trigger_threshold', threshold);
+                });
+            }
+
+            // Quality preset dropdown - apply preset settings
+            const qualityEl = document.getElementById('quality_preset');
+            if (qualityEl) {
+                qualityEl.addEventListener('change', (e) => {
+                    trackChange('quality_preset', 'summarization', 'quality_preset', e.target.value);
+                    applyQualityPreset(e.target.value);
+                });
+            }
+
+            // Text inputs
+            const ollamaHostInput = document.getElementById('ollama_host');
+            if (ollamaHostInput) {
+                ollamaHostInput.addEventListener('change', (e) => {
+                    trackChange('ollama_host', 'summarization', 'ollama_host', e.target.value);
+                });
+            }
 
             // Tag input - track changes for excluded apps
             const tagInput = document.getElementById('excluded_apps_input');
@@ -1707,13 +2197,23 @@
             // AFK
             timeout_seconds: { section: 'afk', key: 'timeout_seconds' },
             min_session_minutes: { section: 'afk', key: 'min_session_minutes' },
-            // Summarization
+            // Summarization - User-facing settings
             summarization_enabled: { section: 'summarization', key: 'enabled' },
             model: { section: 'summarization', key: 'model' },
-            trigger_threshold: { section: 'summarization', key: 'trigger_threshold' },
-            ocr_enabled: { section: 'summarization', key: 'ocr_enabled' },
+            frequency_minutes: { section: 'summarization', key: 'frequency_minutes' },
+            quality_preset: { section: 'summarization', key: 'quality_preset' },
+            // Content mode (multi-select)
+            include_focus_context: { section: 'summarization', key: 'include_focus_context' },
+            include_screenshots: { section: 'summarization', key: 'include_screenshots' },
+            include_ocr: { section: 'summarization', key: 'include_ocr' },
+            // Advanced settings
+            ollama_host: { section: 'summarization', key: 'ollama_host' },
             crop_to_window: { section: 'summarization', key: 'crop_to_window' },
+            trigger_threshold: { section: 'summarization', key: 'trigger_threshold' },
+            max_samples: { section: 'summarization', key: 'max_samples' },
             include_previous_summary: { section: 'summarization', key: 'include_previous_summary' },
+            focus_weighted_sampling: { section: 'summarization', key: 'focus_weighted_sampling' },
+            sample_interval_minutes: { section: 'summarization', key: 'sample_interval_minutes' },
             // Storage
             data_dir: { section: 'storage', key: 'data_dir' },
             max_days_retention: { section: 'storage', key: 'max_days_retention' },

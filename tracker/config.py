@@ -47,11 +47,17 @@ class CaptureConfig:
         format: Image format - webp, png, jpg (default: webp)
         quality: Compression quality 1-100 for lossy formats (default: 80)
         capture_active_monitor_only: Only capture monitor with focused window (default: True)
+        stability_threshold_seconds: Min focus duration before capture (default: 5.0)
+        max_interval_multiplier: Force capture after interval * this (default: 2.0)
+        skip_transient_windows: Skip notifications, popups, etc. (default: True)
     """
     interval_seconds: int = 30
     format: str = "webp"
     quality: int = 80
     capture_active_monitor_only: bool = True
+    stability_threshold_seconds: float = 5.0
+    max_interval_multiplier: float = 2.0
+    skip_transient_windows: bool = True
 
 
 @dataclass
@@ -70,22 +76,55 @@ class AFKConfig:
 class SummarizationConfig:
     """AI summarization configuration.
 
-    Attributes:
+    Simplified settings with presets for common use cases.
+
+    User-facing settings:
         enabled: Enable automatic summarization (default: True)
         model: Ollama model to use (default: gemma3:12b-it-qat)
+        frequency_minutes: How often to generate summaries (default: 15)
+        quality_preset: Quick/Balanced/Thorough - sets underlying params (default: balanced)
+
+    Content mode (multi-select - what to include in LLM request):
+        include_focus_context: Include window titles and time spent (default: True)
+        include_screenshots: Include screenshot images (default: True)
+        include_ocr: Include OCR text extraction (default: True)
+
+    Advanced settings:
         ollama_host: Ollama API host URL (default: http://localhost:11434)
-        trigger_threshold: Number of screenshots to trigger summarization (default: 10)
-        ocr_enabled: Enable OCR text extraction (default: True)
-        crop_to_window: Use cropped window screenshots for better accuracy (default: True)
-        include_previous_summary: Include previous summary for context continuity (default: True)
+        crop_to_window: Use cropped window screenshots (default: True)
+        trigger_threshold: Computed from frequency_minutes (screenshots before summarizing)
+        max_samples: Set by quality_preset (max screenshots to LLM)
+        include_previous_summary: Set by quality_preset (context continuity)
+        focus_weighted_sampling: Set by quality_preset (weight by focus time)
+        sample_interval_minutes: Computed from frequency (target interval between samples)
+
+    Legacy (kept for backward compatibility):
+        summarization_mode: Deprecated - use include_* flags instead
     """
+    # User-facing settings
     enabled: bool = True
     model: str = "gemma3:12b-it-qat"
+    frequency_minutes: int = 15  # 5, 15, 30, 60
+    quality_preset: str = "balanced"  # quick, balanced, thorough
+
+    # Content mode (multi-select checkboxes)
+    include_focus_context: bool = True  # Window titles + duration
+    include_screenshots: bool = True     # Screenshot images
+    include_ocr: bool = True             # OCR text extraction
+
+    # Advanced settings
     ollama_host: str = "http://localhost:11434"
-    trigger_threshold: int = 10
-    ocr_enabled: bool = True
     crop_to_window: bool = True
-    include_previous_summary: bool = True
+
+    # Underlying settings (set by quality_preset or computed)
+    trigger_threshold: int = 30          # Computed: frequency_minutes * 60 / capture_interval
+    max_samples: int = 10                # Set by preset: quick=5, balanced=10, thorough=15
+    include_previous_summary: bool = True  # Set by preset: quick=False, balanced/thorough=True
+    focus_weighted_sampling: bool = True   # Set by preset: quick=False, balanced/thorough=True
+    sample_interval_minutes: int = 10      # Computed from frequency
+
+    # Legacy (backward compatibility)
+    summarization_mode: str = "ocr_and_screenshots"  # Deprecated
 
 
 @dataclass
@@ -138,6 +177,31 @@ class PrivacyConfig:
 
 
 @dataclass
+class TrackingConfig:
+    """Window focus tracking configuration.
+
+    Attributes:
+        min_focus_duration: Ignore focus events shorter than this (default: 1.0)
+        track_window_titles: Track window titles - disable for privacy (default: True)
+        transient_window_classes: Window classes to skip (notifications, popups, etc.)
+    """
+    min_focus_duration: float = 1.0
+    track_window_titles: bool = True
+    transient_window_classes: list[str] = field(default_factory=lambda: [
+        "notification",
+        "popup",
+        "tooltip",
+        "dropdown",
+        "menu",
+        "Dunst",
+        "notify-osd",
+        "xfce4-notifyd",
+        "plank",
+        "cairo-dock"
+    ])
+
+
+@dataclass
 class Config:
     """Top-level configuration container.
 
@@ -148,6 +212,7 @@ class Config:
         storage: Storage and retention settings
         web: Web server settings
         privacy: Privacy controls
+        tracking: Window focus tracking settings
     """
     capture: CaptureConfig = field(default_factory=CaptureConfig)
     afk: AFKConfig = field(default_factory=AFKConfig)
@@ -155,6 +220,7 @@ class Config:
     storage: StorageConfig = field(default_factory=StorageConfig)
     web: WebConfig = field(default_factory=WebConfig)
     privacy: PrivacyConfig = field(default_factory=PrivacyConfig)
+    tracking: TrackingConfig = field(default_factory=TrackingConfig)
 
 
 class ConfigManager:
@@ -243,6 +309,7 @@ class ConfigManager:
         storage_data = filter_known_fields(data.get('storage', {}), StorageConfig)
         web_data = filter_known_fields(data.get('web', {}), WebConfig)
         privacy_data = filter_known_fields(data.get('privacy', {}), PrivacyConfig)
+        tracking_data = filter_known_fields(data.get('tracking', {}), TrackingConfig)
 
         return Config(
             capture=CaptureConfig(**capture_data),
@@ -251,6 +318,7 @@ class ConfigManager:
             storage=StorageConfig(**storage_data),
             web=WebConfig(**web_data),
             privacy=PrivacyConfig(**privacy_data),
+            tracking=TrackingConfig(**tracking_data),
         )
 
     def save(self) -> None:

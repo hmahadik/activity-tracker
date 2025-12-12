@@ -9,14 +9,17 @@ A Linux background service that automatically captures desktop screenshots at re
 - **Window Context Extraction**: Records active window title and application name
 - **Session-Based Tracking**: Automatically detects AFK periods to group activity into sessions
 - **AFK Detection**: Uses pynput to monitor keyboard/mouse activity (configurable timeout)
+- **Window Focus Tracking**: Real-time tracking of app/window usage with duration metrics
 - **Timeline View**: Interactive calendar heatmap with session-based activity breakdown
 - **Analytics Dashboard**: Comprehensive charts showing activity patterns and trends
+- **Report Generation**: Natural language time ranges ("last week", "past 3 days") with multiple formats
 - **Web-based Viewer**: Rich Flask interface with multiple views for browsing and analysis
-- **Efficient Storage**: WebP compression and organized directory structure
+- **Efficient Storage**: WebP compression with thumbnails for fast loading
 - **Systemd Integration**: Runs as user service with automatic restart
 - **X11 Support**: Optimized for X11 display server (Wayland support planned)
-- **AI Activity Summaries**: Vision LLM-powered session summaries with OCR grounding
+- **AI Activity Summaries**: Vision LLM-powered summaries with app/window usage context
 - **Smart Session Resume**: Resumes previous session on restart if within AFK timeout
+- **Multi-monitor Support**: Captures only the active monitor, reducing storage needs
 
 ## Architecture
 
@@ -70,8 +73,21 @@ A Linux background service that automatically captures desktop screenshots at re
    - Hybrid OCR + vision LLM for activity understanding
    - Tesseract OCR for text extraction from screenshots
    - Ollama integration with configurable vision models
-   - Session-based summary generation with context continuity
+   - App/window usage context passed to LLM for accurate summaries
+   - Focus-weighted screenshot sampling based on time spent per app
    - Returns full API request details for debugging
+
+9. **Window Focus Tracker (`tracker/window_watcher.py`)**
+   - Real-time window focus tracking via xdotool/xprop
+   - Duration tracking per app and window title
+   - Focus events stored in database with session links
+   - Provides time breakdown data for AI summarization
+
+10. **Report Generator (`tracker/reports.py`)**
+    - Natural language time range parsing ("last week", "past 3 days")
+    - Three report types: Summary, Detailed, Standup
+    - Export to Markdown, HTML, PDF, JSON formats
+    - Analytics computation for app/window usage
 
 ### Data Storage Structure
 
@@ -271,10 +287,12 @@ summarization:
 
 **Threshold-Based Summarization:**
 
-Auto-summarization is enabled by default. Summaries are automatically generated after every N screenshots (default: 10). Configure this in the Settings page:
-- **Trigger Threshold**: Number of screenshots before generating a summary
+Auto-summarization is enabled by default. Summaries are generated at configurable time intervals. Configure this in the Settings page:
+- **Summary Frequency**: Time between summaries (5/15/30/60 minutes)
 - **Model**: Select from available Ollama models (auto-detected)
-- **Include Previous Summary**: Use context from last summary for continuity
+- **Quality Preset**: Quick (5 samples), Balanced (10 samples), Thorough (15 samples)
+- **Content to Include**: App/window usage, Screenshots, OCR text (checkboxes)
+- **Advanced Settings**: Ollama host, crop to window, prompt preview
 
 ## Usage
 
@@ -556,8 +574,12 @@ activity-tracker/
 │   ├── daemon.py              # Background service process
 │   ├── analytics.py           # Activity analytics and statistics
 │   ├── vision.py              # AI summarization (OCR + LLM)
+│   ├── summarizer_worker.py   # Background summarization worker
 │   ├── afk.py                 # AFK detection via pynput
 │   ├── sessions.py            # Session management
+│   ├── window_watcher.py      # Real-time window focus tracking
+│   ├── reports.py             # Report generation
+│   ├── timeparser.py          # Natural language time parsing
 │   └── config.py              # Configuration settings
 ├── web/                       # Web interface
 │   ├── app.py                 # Flask application with REST API
@@ -565,6 +587,8 @@ activity-tracker/
 │       ├── base.html          # Base template with navigation
 │       ├── timeline.html      # Calendar heatmap view (with summaries)
 │       ├── analytics.html     # Analytics dashboard
+│       ├── reports.html       # Report generation UI
+│       ├── settings.html      # Configuration UI
 │       └── day.html           # Daily screenshot view
 ├── scripts/                   # Installation and utilities
 │   ├── install.sh             # Systemd service setup
@@ -673,18 +697,20 @@ chmod 644 ~/activity-tracker-data/activity.db
 - [x] **Charts & Visualization**: Interactive charts using Chart.js
 - [x] **Comprehensive Test Suite**: Pytest-based testing with 85% coverage
 - [x] **AI Summarization**: Vision LLM-powered activity summaries with OCR grounding
-- [x] **Auto-Summarization**: Threshold-based background summarization (every N screenshots)
+- [x] **Auto-Summarization**: Time-based background summarization with quality presets
 - [x] **Session-Based Tracking**: AFK detection with pynput, session management
 - [x] **Smart Session Resume**: Resume previous session on restart if within timeout
 - [x] **Summary Debugging**: View exact API requests sent to Ollama
 - [x] **Configuration File**: YAML-based settings with web UI (Settings page)
 - [x] **Multi-monitor Support**: Captures only active monitor, stores monitor metadata
 - [x] **Summary Regeneration**: Regenerate summaries with different models/settings
+- [x] **Window Focus Tracking**: Real-time app/window usage with duration metrics
+- [x] **Report Generation**: Natural language time ranges with multiple export formats
+- [x] **Thumbnails**: Fast-loading timeline with 200px thumbnail previews
 
 ### Planned
 - [ ] **Wayland Support**: Add sway/wlroots integration for window information
 - [ ] **Privacy Filters**: Blur sensitive areas or skip certain applications
-- [ ] **Export Features**: Generate reports and data exports (CSV/JSON/PDF)
 - [ ] **Search & Tagging**: Search screenshots by window title, add custom tags
 - [ ] **Daily Rollup Summaries**: Consolidate threshold summaries into daily digests
 

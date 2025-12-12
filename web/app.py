@@ -15,6 +15,7 @@ from tracker.sessions import SessionManager
 from tracker.vision import HybridSummarizer
 from tracker.config import get_config_manager, Config
 from tracker.monitors import get_monitors
+from tracker.project_detector import ProjectDetector
 from dataclasses import asdict
 
 app = Flask(__name__)
@@ -25,6 +26,7 @@ config_manager = get_config_manager()
 DATA_DIR = Path.home() / "activity-tracker-data"
 DB_PATH = DATA_DIR / "activity.db"
 SCREENSHOTS_DIR = DATA_DIR / "screenshots"
+THUMBNAILS_DIR = DATA_DIR / "thumbnails"
 
 # Global state for background summarization
 summarization_state = {
@@ -118,6 +120,14 @@ def analytics():
                          page='analytics')
 
 
+@app.route('/summary/<int:summary_id>')
+def summary_detail(summary_id):
+    """Show detailed view of a specific AI summary."""
+    return render_template('summary_detail.html',
+                         summary_id=summary_id,
+                         page='timeline')
+
+
 @app.route('/screenshot/<int:screenshot_id>')
 def serve_screenshot(screenshot_id):
     """Serve the actual screenshot image file."""
@@ -138,6 +148,37 @@ def serve_screenshot(screenshot_id):
     if not file_path.exists():
         abort(404, "Screenshot file not found on disk")
     
+    return send_file(file_path, mimetype='image/webp')
+
+
+@app.route('/thumbnail/<int:screenshot_id>')
+def serve_thumbnail(screenshot_id):
+    """Serve the thumbnail version of a screenshot.
+
+    Falls back to the original screenshot if thumbnail doesn't exist.
+    """
+    conn = get_db_connection()
+
+    cursor = conn.execute("""
+        SELECT filepath FROM screenshots WHERE id = ?
+    """, (screenshot_id,))
+
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        abort(404, "Screenshot not found")
+
+    # Try thumbnail first, fall back to original
+    thumb_path = THUMBNAILS_DIR / row['filepath']
+    if thumb_path.exists():
+        return send_file(thumb_path, mimetype='image/webp')
+
+    # Fall back to original screenshot
+    file_path = SCREENSHOTS_DIR / row['filepath']
+    if not file_path.exists():
+        abort(404, "Screenshot file not found on disk")
+
     return send_file(file_path, mimetype='image/webp')
 
 
@@ -353,6 +394,276 @@ def api_screenshots_by_hour(date_string, hour):
         })
     except Exception as e:
         return jsonify({"error": f"Failed to get screenshots: {str(e)}"}), 500
+
+
+@app.route('/api/screenshots/batch')
+def api_screenshots_batch():
+    """Get screenshots by a list of IDs.
+
+    Query params:
+        ids: Comma-separated list of screenshot IDs
+
+    Returns:
+        {"screenshots": [...], "count": N}
+    """
+    ids_param = request.args.get('ids', '')
+    if not ids_param:
+        return jsonify({"error": "Missing 'ids' parameter"}), 400
+
+    try:
+        ids = [int(id.strip()) for id in ids_param.split(',') if id.strip()]
+        if not ids:
+            return jsonify({"screenshots": [], "count": 0})
+
+        placeholders = ','.join('?' * len(ids))
+        conn = get_db_connection()
+        cursor = conn.execute(f"""
+            SELECT id, timestamp, filepath, dhash, window_title, app_name
+            FROM screenshots
+            WHERE id IN ({placeholders})
+            ORDER BY timestamp ASC
+        """, ids)
+
+        screenshots = []
+        for row in cursor.fetchall():
+            screenshots.append({
+                'id': row['id'],
+                'timestamp': row['timestamp'],
+                'filepath': row['filepath'],
+                'file_hash': row['dhash'],
+                'window_title': row['window_title'],
+                'app_name': row['app_name'],
+                'iso_time': datetime.fromtimestamp(row['timestamp']).isoformat()
+            })
+
+        conn.close()
+
+        return jsonify({
+            "count": len(screenshots),
+            "screenshots": screenshots
+        })
+    except ValueError:
+        return jsonify({"error": "Invalid ID format"}), 400
+    except Exception as e:
+        return jsonify({"error": f"Failed to get screenshots: {str(e)}"}), 500
+
+
+@app.route('/api/screenshots/<date_string>')
+def api_screenshots_for_date(date_string):
+    """Get all screenshots for a specific date.
+
+    Args:
+        date_string: Date in YYYY-MM-DD format
+
+    Returns:
+        {"date": "2025-12-10", "count": N, "screenshots": [...]}
+    """
+    try:
+        target_date = datetime.strptime(date_string, '%Y-%m-%d').date()
+    except ValueError:
+        return jsonify({"error": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+    try:
+        start_timestamp = int(datetime.combine(target_date, datetime.min.time()).timestamp())
+        end_timestamp = int(datetime.combine(target_date + timedelta(days=1), datetime.min.time()).timestamp())
+
+        conn = get_db_connection()
+        cursor = conn.execute("""
+            SELECT id, timestamp, filepath, dhash, window_title, app_name
+            FROM screenshots
+            WHERE timestamp >= ? AND timestamp < ?
+            ORDER BY timestamp ASC
+        """, (start_timestamp, end_timestamp))
+
+        screenshots = []
+        for row in cursor.fetchall():
+            screenshots.append({
+                'id': row['id'],
+                'timestamp': row['timestamp'],
+                'filepath': f"/screenshot/{row['id']}",
+                'window_title': row['window_title'],
+                'app_name': row['app_name']
+            })
+
+        conn.close()
+
+        return jsonify({
+            "date": date_string,
+            "count": len(screenshots),
+            "screenshots": screenshots
+        })
+    except Exception as e:
+        return jsonify({"error": f"Failed to get screenshots: {str(e)}"}), 500
+
+
+# =============================================================================
+# Focus Analytics API endpoints
+# =============================================================================
+
+@app.route('/api/analytics/focus/<date>')
+def get_focus_analytics(date):
+    """Get detailed focus analytics for a specific day.
+
+    Args:
+        date: Date string in YYYY-MM-DD format
+
+    Returns:
+        {
+            "date": "2025-12-09",
+            "apps": [...],
+            "windows": [...],
+            "hourly": [...],
+            "metrics": {
+                "total_tracked_seconds": 14400,
+                "context_switches": 42,
+                "longest_focus_sessions": [...],
+                "unique_apps": 5,
+                "unique_windows": 12
+            }
+        }
+    """
+    try:
+        start = datetime.strptime(date, '%Y-%m-%d')
+        end = start + timedelta(days=1) - timedelta(seconds=1)
+    except ValueError:
+        return jsonify({'error': 'Invalid date format, use YYYY-MM-DD'}), 400
+
+    try:
+        storage = ActivityStorage()
+
+        apps = storage.get_app_durations_in_range(start, end)
+        windows = storage.get_window_durations_in_range(start, end, limit=20)
+        hourly = storage.get_hourly_app_breakdown(date)
+        context_switches = storage.get_context_switch_count(start, end)
+        longest_sessions = storage.get_longest_focus_sessions(start, end, min_duration_minutes=10, limit=10)
+
+        total_tracked_seconds = sum(a.get('total_seconds', 0) or 0 for a in apps)
+
+        return jsonify({
+            'date': date,
+            'apps': apps,
+            'windows': windows,
+            'hourly': hourly,
+            'metrics': {
+                'total_tracked_seconds': total_tracked_seconds,
+                'context_switches': context_switches,
+                'longest_focus_sessions': longest_sessions,
+                'unique_apps': len(apps),
+                'unique_windows': len(windows),
+            }
+        })
+    except Exception as e:
+        return jsonify({'error': f'Failed to get focus analytics: {str(e)}'}), 500
+
+
+@app.route('/api/analytics/focus/timeline')
+def get_focus_timeline():
+    """Get focus events for timeline visualization.
+
+    Query params:
+        start: ISO datetime string (required)
+        end: ISO datetime string (required)
+
+    Returns:
+        {
+            "events": [...],
+            "total_events": 42
+        }
+    """
+    try:
+        start_param = request.args.get('start')
+        end_param = request.args.get('end')
+
+        if not start_param or not end_param:
+            return jsonify({'error': 'start and end parameters required'}), 400
+
+        start = datetime.fromisoformat(start_param)
+        end = datetime.fromisoformat(end_param)
+    except (TypeError, ValueError) as e:
+        return jsonify({'error': f'Invalid start/end parameters: {e}'}), 400
+
+    try:
+        storage = ActivityStorage()
+        events = storage.get_focus_events_in_range(start, end)
+
+        # Format events for response
+        formatted_events = []
+        for e in events:
+            start_time = e.get('start_time')
+            end_time = e.get('end_time')
+
+            # Handle datetime objects or strings
+            if isinstance(start_time, datetime):
+                start_time = start_time.isoformat()
+            if isinstance(end_time, datetime):
+                end_time = end_time.isoformat()
+
+            formatted_events.append({
+                'app_name': e.get('app_name'),
+                'window_title': e.get('window_title'),
+                'start_time': start_time,
+                'end_time': end_time,
+                'duration_seconds': e.get('duration_seconds')
+            })
+
+        return jsonify({
+            'events': formatted_events,
+            'total_events': len(formatted_events)
+        })
+    except Exception as e:
+        return jsonify({'error': f'Failed to get focus timeline: {str(e)}'}), 500
+
+
+@app.route('/api/analytics/focus/summary')
+def get_focus_summary():
+    """Get focus summary for a time range (for reports).
+
+    Query params:
+        start: ISO datetime string (required)
+        end: ISO datetime string (required)
+
+    Returns:
+        {
+            "total_tracked_time": {"seconds": 14400, "formatted": "4h 0m"},
+            "context_switches": 42,
+            "top_apps": [...],
+            "deep_work_sessions": [...]
+        }
+    """
+    try:
+        start_param = request.args.get('start')
+        end_param = request.args.get('end')
+
+        if not start_param or not end_param:
+            return jsonify({'error': 'start and end parameters required'}), 400
+
+        start = datetime.fromisoformat(start_param)
+        end = datetime.fromisoformat(end_param)
+    except (TypeError, ValueError) as e:
+        return jsonify({'error': f'Invalid start/end parameters: {e}'}), 400
+
+    try:
+        storage = ActivityStorage()
+
+        apps = storage.get_app_durations_in_range(start, end)
+        total_seconds = sum(a.get('total_seconds', 0) or 0 for a in apps)
+
+        # Format duration
+        hours = int(total_seconds // 3600)
+        mins = int((total_seconds % 3600) // 60)
+        formatted = f"{hours}h {mins}m"
+
+        return jsonify({
+            'total_tracked_time': {
+                'seconds': total_seconds,
+                'formatted': formatted
+            },
+            'context_switches': storage.get_context_switch_count(start, end),
+            'top_apps': apps[:5],
+            'deep_work_sessions': storage.get_longest_focus_sessions(start, end, min_duration_minutes=10, limit=5)
+        })
+    except Exception as e:
+        return jsonify({'error': f'Failed to get focus summary: {str(e)}'}), 500
 
 
 @app.route('/api/summaries/<date_string>')
@@ -748,91 +1059,6 @@ def api_current_session():
         return jsonify({"error": f"Failed to get current session: {str(e)}"}), 500
 
 
-# Session summarization state
-session_summarization_state = {
-    "running": False,
-    "session_id": None,
-    "error": None,
-}
-
-
-def _run_session_summarization(session_id: int):
-    """Background thread function to run session summarization."""
-    global session_summarization_state
-
-    try:
-        storage = ActivityStorage()
-        summarizer = HybridSummarizer()
-
-        if not summarizer.is_available():
-            session_summarization_state["error"] = "Summarizer not available"
-            session_summarization_state["running"] = False
-            return
-
-        # Get session
-        session = storage.get_session(session_id)
-        if not session:
-            session_summarization_state["error"] = "Session not found"
-            session_summarization_state["running"] = False
-            return
-
-        # Get screenshots
-        screenshots = storage.get_session_screenshots(session_id)
-        if len(screenshots) < 2:
-            session_summarization_state["error"] = "Not enough screenshots"
-            session_summarization_state["running"] = False
-            return
-
-        # Process OCR
-        unique_titles = storage.get_unique_window_titles_for_session(session_id)
-        ocr_texts = []
-
-        for title in unique_titles:
-            cached = storage.get_cached_ocr(session_id, title)
-            if cached is not None:
-                ocr_texts.append({"window_title": title, "ocr_text": cached})
-                continue
-
-            for s in screenshots:
-                if s.get("window_title") == title:
-                    try:
-                        # Use cropped version for better OCR accuracy
-                        cropped_path = summarizer.get_cropped_path(s)
-                        ocr_text = summarizer.extract_ocr(cropped_path)
-                        storage.cache_ocr(session_id, title, ocr_text, s["id"])
-                        ocr_texts.append({"window_title": title, "ocr_text": ocr_text})
-                    except Exception:
-                        pass
-                    break
-
-        # Get previous summary for context
-        recent_summaries = storage.get_recent_summaries(1)
-        previous_summary = recent_summaries[0] if recent_summaries else None
-
-        # Generate summary
-        summary, inference_ms, prompt_text, screenshot_ids_used = summarizer.summarize_session(
-            screenshots=screenshots,
-            ocr_texts=ocr_texts,
-            previous_summary=previous_summary,
-        )
-
-        # Save
-        storage.save_session_summary(
-            session_id=session_id,
-            summary=summary,
-            model=summarizer.model,
-            inference_ms=inference_ms,
-            prompt_text=prompt_text,
-            screenshot_ids_used=screenshot_ids_used,
-        )
-
-    except Exception as e:
-        session_summarization_state["error"] = str(e)
-    finally:
-        session_summarization_state["running"] = False
-        session_summarization_state["session_id"] = None
-
-
 @app.route('/api/sessions/<int:session_id>')
 def api_get_session(session_id):
     """Get details for a single session including summary if available."""
@@ -844,66 +1070,6 @@ def api_get_session(session_id):
         return jsonify(session)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/sessions/<int:session_id>/summarize', methods=['POST'])
-def api_summarize_session(session_id):
-    """Manually trigger summarization for a specific session.
-
-    Returns:
-        {"status": "started"} or {"status": "already_summarized"} or error
-    """
-    global session_summarization_state
-
-    if session_summarization_state["running"]:
-        return jsonify({
-            "status": "already_running",
-            "session_id": session_summarization_state["session_id"],
-        }), 409
-
-    try:
-        storage = ActivityStorage()
-
-        # Verify session exists
-        session = storage.get_session(session_id)
-        if not session:
-            return jsonify({"error": "Session not found"}), 404
-
-        # Check if already summarized
-        if session.get("summary") and not (request.json or {}).get("force"):
-            return jsonify({
-                "status": "already_summarized",
-                "summary": session["summary"],
-            })
-
-        # Start background summarization
-        session_summarization_state.update({
-            "running": True,
-            "session_id": session_id,
-            "error": None,
-        })
-
-        thread = threading.Thread(
-            target=_run_session_summarization,
-            args=(session_id,)
-        )
-        thread.daemon = True
-        thread.start()
-
-        return jsonify({"status": "started"})
-
-    except Exception as e:
-        return jsonify({"error": f"Failed to start summarization: {str(e)}"}), 500
-
-
-@app.route('/api/sessions/<int:session_id>/summarize/status')
-def api_session_summarize_status(session_id):
-    """Get current session summarization progress."""
-    return jsonify({
-        "running": session_summarization_state["running"] and session_summarization_state["session_id"] == session_id,
-        "session_id": session_summarization_state["session_id"],
-        "error": session_summarization_state["error"],
-    })
 
 
 @app.route('/settings')
@@ -1169,6 +1335,44 @@ def get_ollama_models():
         })
 
 
+@app.route('/api/summarization/prompt-template', methods=['GET'])
+def get_prompt_template():
+    """Get the prompt template used for summarization.
+
+    Returns the current prompt template so users can see exactly
+    what's being sent to the AI model.
+    """
+    # This is the prompt template from vision.py HybridSummarizer.summarize_session
+    template = """You are summarizing a developer's work activity.
+
+[Previous context: {previous_summary}]
+
+## Time Breakdown (from focus tracking)
+{focus_context}
+
+## Window Content (OCR)
+{ocr_section}
+
+## Screenshots
+{num_screenshots} screenshots attached showing actual screen content.
+
+Based on the time breakdown, OCR text, and screenshots, write ONE sentence (max 25 words) describing the PRIMARY activity.
+
+IMPORTANT: Output ONLY the summary sentence. No explanation, no reasoning, no preamble.
+
+Guidelines:
+- Be SPECIFIC: mention actual file names, function names, or topics visible
+- Focus on WHAT was accomplished, not just what apps were used
+- Use active voice: "Implemented X", "Debugged Y", "Reviewed Z"
+- If multiple activities, focus on the dominant one (based on time breakdown)
+"""
+
+    return jsonify({
+        'template': template,
+        'note': 'Sections are included based on Content Mode settings. Variables like {focus_context} are filled with actual data.'
+    })
+
+
 # ==================== Threshold-Based Summary API ====================
 
 # Global reference to summarizer worker (set by daemon when running)
@@ -1189,17 +1393,72 @@ def api_get_threshold_summaries(date):
         date: Date string in YYYY-MM-DD format
 
     Returns:
-        {"summaries": [...], "date": "2025-12-09"}
+        {"summaries": [...], "date": "2025-12-09", "projects": [...]}
     """
     try:
         storage = ActivityStorage()
         summaries = storage.get_threshold_summaries_for_date(date)
+
+        # Extract unique projects
+        projects = list(set(s.get('project') or 'unknown' for s in summaries))
+
         return jsonify({
             "date": date,
-            "summaries": summaries
+            "summaries": summaries,
+            "projects": sorted(projects)
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/threshold-summaries/<date>/by-project')
+def api_get_summaries_by_project(date):
+    """Get threshold summaries for a date, grouped by project.
+
+    Args:
+        date: Date string in YYYY-MM-DD format
+
+    Returns:
+        {
+            "date": "2025-12-09",
+            "projects": {
+                "activity-tracker": [...],
+                "acusight": [...]
+            },
+            "project_count": 2
+        }
+    """
+    try:
+        start = datetime.strptime(date, '%Y-%m-%d')
+        end = start + timedelta(days=1) - timedelta(seconds=1)
+    except ValueError:
+        return jsonify({'error': 'Invalid date format, use YYYY-MM-DD'}), 400
+
+    try:
+        storage = ActivityStorage()
+        by_project = storage.get_summaries_by_project(start, end)
+
+        # Format for JSON response
+        formatted = {}
+        for project, summaries in by_project.items():
+            formatted[project] = [
+                {
+                    'id': s.get('id'),
+                    'start_time': s['start_time'].isoformat() if isinstance(s.get('start_time'), datetime) else s.get('start_time'),
+                    'end_time': s['end_time'].isoformat() if isinstance(s.get('end_time'), datetime) else s.get('end_time'),
+                    'summary': s.get('summary'),
+                    'screenshot_count': s.get('screenshot_count')
+                }
+                for s in summaries
+            ]
+
+        return jsonify({
+            'date': date,
+            'projects': formatted,
+            'project_count': len(by_project)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/threshold-summaries/<int:summary_id>/regenerate', methods=['POST'])
@@ -1232,6 +1491,55 @@ def api_regenerate_summary(summary_id):
         "status": "queued",
         "summary_id": summary_id
     })
+
+
+@app.route('/api/threshold-summaries/<date>/regenerate-all', methods=['POST'])
+def api_regenerate_day_summaries(date):
+    """Queue all summaries for a date for regeneration.
+
+    Args:
+        date: Date in YYYY-MM-DD format
+
+    Returns:
+        {"status": "queued", "count": 5, "summary_ids": [1, 2, 3, 4, 5]}
+    """
+    global summarizer_worker
+
+    # Validate date format
+    try:
+        datetime.strptime(date, '%Y-%m-%d')
+    except ValueError:
+        return jsonify({'error': 'Invalid date format, use YYYY-MM-DD'}), 400
+
+    try:
+        storage = ActivityStorage()
+        summaries = storage.get_threshold_summaries_for_date(date)
+
+        if not summaries:
+            return jsonify({'error': 'No summaries found for this date'}), 404
+
+        summary_ids = [s['id'] for s in summaries]
+
+        # Ensure worker is available
+        if summarizer_worker is None:
+            try:
+                from tracker.summarizer_worker import SummarizerWorker
+                summarizer_worker = SummarizerWorker(storage, config_manager)
+                summarizer_worker.start()
+            except Exception as e:
+                return jsonify({"error": f"Summarizer not available: {e}"}), 503
+
+        # Queue each summary for regeneration
+        for summary_id in summary_ids:
+            summarizer_worker.queue_regenerate(summary_id)
+
+        return jsonify({
+            "status": "queued",
+            "count": len(summary_ids),
+            "summary_ids": summary_ids
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/threshold-summaries/<int:summary_id>/history')
@@ -1289,6 +1597,128 @@ def api_delete_summary(summary_id):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/threshold-summaries/<int:summary_id>/detail')
+def api_get_summary_detail(summary_id):
+    """Get detailed information about a summary for the detail page.
+
+    Returns full summary data plus screenshots, focus events, and window info.
+    """
+    try:
+        storage = ActivityStorage()
+        summary = storage.get_threshold_summary(summary_id)
+
+        if not summary:
+            return jsonify({"error": "Summary not found"}), 404
+
+        # Get full screenshot data for each screenshot in this summary
+        screenshots = []
+        for sid in summary.get('screenshot_ids', []):
+            s = storage.get_screenshot_by_id(sid)
+            if s:
+                # Add formatted time
+                s['formatted_time'] = datetime.fromtimestamp(s['timestamp']).strftime('%H:%M:%S')
+                screenshots.append(s)
+
+        # Sort by timestamp
+        screenshots.sort(key=lambda x: x['timestamp'])
+
+        # Calculate duration
+        if screenshots:
+            start_ts = screenshots[0]['timestamp']
+            end_ts = screenshots[-1]['timestamp']
+            duration_seconds = end_ts - start_ts
+            duration_minutes = int(duration_seconds // 60)
+        else:
+            duration_minutes = 0
+
+        # Get focus events for this time range (use overlapping to catch events spanning boundaries)
+        focus_events = []
+        if summary.get('start_time') and summary.get('end_time'):
+            start_dt = datetime.fromisoformat(summary['start_time']) if isinstance(summary['start_time'], str) else summary['start_time']
+            end_dt = datetime.fromisoformat(summary['end_time']) if isinstance(summary['end_time'], str) else summary['end_time']
+            focus_events = storage.get_focus_events_overlapping_range(start_dt, end_dt)
+
+        # Calculate window durations from focus events
+        # Focus events already have duration_seconds computed
+        window_durations = {}
+        for event in focus_events:
+            title = event.get('window_title', 'Unknown')
+            # Use the pre-computed duration_seconds field
+            duration = event.get('duration_seconds', 0)
+
+            # Clip duration to the summary time range if event spans boundaries
+            event_start = datetime.fromisoformat(event['start_time']) if isinstance(event['start_time'], str) else event['start_time']
+            event_end = datetime.fromisoformat(event['end_time']) if isinstance(event['end_time'], str) else event['end_time']
+
+            # Clip to summary range
+            clipped_start = max(event_start, start_dt)
+            clipped_end = min(event_end, end_dt)
+            if clipped_end > clipped_start:
+                duration = (clipped_end - clipped_start).total_seconds()
+            else:
+                duration = 0
+
+            if duration > 0:
+                if title not in window_durations:
+                    window_durations[title] = 0
+                window_durations[title] += duration
+
+        # Filter window durations by project if this is a project-specific summary
+        project_name = summary.get('project')
+        if project_name and project_name != 'unknown':
+            detector = ProjectDetector()
+            filtered_durations = {}
+            for event in focus_events:
+                title = event.get('window_title', 'Unknown')
+                app_name = event.get('app_name', '')
+
+                # Check if this window belongs to the summary's project
+                detected = detector.detect(title, app_name)
+                if detected.name != project_name:
+                    continue
+
+                # Use clipped duration
+                event_start = datetime.fromisoformat(event['start_time']) if isinstance(event['start_time'], str) else event['start_time']
+                event_end = datetime.fromisoformat(event['end_time']) if isinstance(event['end_time'], str) else event['end_time']
+                clipped_start = max(event_start, start_dt)
+                clipped_end = min(event_end, end_dt)
+                if clipped_end > clipped_start:
+                    duration = (clipped_end - clipped_start).total_seconds()
+                    if title not in filtered_durations:
+                        filtered_durations[title] = 0
+                    filtered_durations[title] += duration
+
+            window_durations = filtered_durations
+
+        # Sort by duration descending
+        window_durations_list = [
+            {'title': title, 'duration_seconds': dur}
+            for title, dur in sorted(window_durations.items(), key=lambda x: -x[1])
+        ]
+
+        # Calculate context switches (app changes within the time range)
+        context_switches = 0
+        if len(focus_events) > 1:
+            for i in range(1, len(focus_events)):
+                if focus_events[i].get('app_name') != focus_events[i-1].get('app_name'):
+                    context_switches += 1
+
+        # Get version history
+        versions = storage.get_summary_versions(summary_id)
+
+        return jsonify({
+            "summary": summary,
+            "screenshots": screenshots,
+            "duration_minutes": duration_minutes,
+            "window_durations": window_durations_list,
+            "focus_event_count": len(focus_events),
+            "context_switches": context_switches,
+            "versions": versions,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/threshold-summaries/pending')
 def api_get_pending_count():
     """Get count of screenshots waiting for summarization.
@@ -1296,19 +1726,39 @@ def api_get_pending_count():
     Returns:
         {
             "unsummarized_count": 7,
-            "threshold": 10,
-            "ready_batches": 0
+            "frequency_minutes": 15,
+            "minutes_until_next": 8
         }
     """
     try:
         storage = ActivityStorage()
         unsummarized = storage.get_unsummarized_screenshots()
-        threshold = config_manager.config.summarization.trigger_threshold
+        frequency_minutes = config_manager.config.summarization.frequency_minutes
+
+        # Calculate minutes until next summary
+        minutes_until_next = frequency_minutes
+        last_summary = storage.get_last_threshold_summary()
+        if last_summary:
+            last_end_str = last_summary.get('end_time', '')
+            try:
+                from datetime import datetime
+                if 'T' in last_end_str:
+                    last_end = datetime.fromisoformat(last_end_str.replace('Z', '+00:00'))
+                    if last_end.tzinfo:
+                        last_end = last_end.replace(tzinfo=None)
+                else:
+                    last_end = datetime.strptime(last_end_str, '%Y-%m-%d %H:%M:%S')
+
+                elapsed = datetime.now() - last_end
+                elapsed_minutes = elapsed.total_seconds() / 60
+                minutes_until_next = max(0, frequency_minutes - elapsed_minutes)
+            except (ValueError, TypeError):
+                pass
 
         return jsonify({
             "unsummarized_count": len(unsummarized),
-            "threshold": threshold,
-            "ready_batches": len(unsummarized) // threshold
+            "frequency_minutes": frequency_minutes,
+            "minutes_until_next": round(minutes_until_next, 1)
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1334,6 +1784,168 @@ def api_get_worker_status():
     return jsonify(summarizer_worker.get_status())
 
 
+@app.route('/api/threshold-summaries/generate', methods=['POST'])
+def api_force_generate_summaries():
+    """Force immediate summarization of all pending screenshots.
+
+    Returns:
+        {"status": "queued", "count": 15}
+        or {"error": "message"}
+    """
+    global summarizer_worker
+
+    if summarizer_worker is None:
+        return jsonify({
+            "error": "Worker not attached (daemon may not be running)"
+        }), 503
+
+    try:
+        count = summarizer_worker.force_summarize_pending()
+        if count == 0:
+            return jsonify({
+                "status": "no_pending",
+                "count": 0,
+                "message": "No unsummarized screenshots"
+            })
+        return jsonify({
+            "status": "queued",
+            "count": count
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ==================== Daily Rollup Summary API ====================
+
+@app.route('/api/daily-summary/<date>')
+def api_get_daily_summary(date):
+    """Get the daily rollup summary for a date.
+
+    Args:
+        date: Date in YYYY-MM-DD format
+
+    Returns:
+        {"date": "2024-12-10", "summary": "...", "created_at": "..."}
+        or {"error": "No daily summary for this date"} with 404
+    """
+    try:
+        datetime.strptime(date, '%Y-%m-%d')
+    except ValueError:
+        return jsonify({'error': 'Invalid date format, use YYYY-MM-DD'}), 400
+
+    try:
+        storage = ActivityStorage()
+        summary = storage.get_daily_summary(date)
+
+        if not summary:
+            return jsonify({'error': 'No daily summary for this date'}), 404
+
+        return jsonify(summary)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/daily-summary/<date>/generate', methods=['POST'])
+def api_generate_daily_summary(date):
+    """Generate a daily rollup summary from threshold summaries.
+
+    Combines all AI summaries for the day into a single high-level overview.
+
+    Args:
+        date: Date in YYYY-MM-DD format
+
+    Returns:
+        {"status": "success", "summary": "...", "source_count": 5}
+    """
+    try:
+        datetime.strptime(date, '%Y-%m-%d')
+    except ValueError:
+        return jsonify({'error': 'Invalid date format, use YYYY-MM-DD'}), 400
+
+    try:
+        storage = ActivityStorage()
+        summaries = storage.get_threshold_summaries_for_date(date)
+
+        if not summaries:
+            return jsonify({'error': 'No AI summaries for this date to synthesize'}), 404
+
+        # Prepare summary texts for synthesis
+        # Limit to avoid exceeding model context window
+        MAX_SUMMARIES = 20  # Keep at most 20 summaries
+        MAX_SUMMARY_LENGTH = 150  # Truncate each summary
+        MAX_TOTAL_CHARS = 6000  # Max total input size
+
+        # If too many summaries, sample evenly throughout the day
+        if len(summaries) > MAX_SUMMARIES:
+            step = len(summaries) / MAX_SUMMARIES
+            summaries = [summaries[int(i * step)] for i in range(MAX_SUMMARIES)]
+
+        summary_texts = []
+        for s in summaries:
+            start_time = s['start_time']
+            if isinstance(start_time, str):
+                start_time = datetime.fromisoformat(start_time)
+            time_str = start_time.strftime('%H:%M')
+            project = s.get('project', 'unknown')
+            # Truncate long summaries
+            summary_text = s['summary']
+            if len(summary_text) > MAX_SUMMARY_LENGTH:
+                summary_text = summary_text[:MAX_SUMMARY_LENGTH] + "..."
+            summary_texts.append(f"[{time_str}] ({project}) {summary_text}")
+
+        combined_input = "\n".join(summary_texts)
+
+        # Final safety truncation
+        if len(combined_input) > MAX_TOTAL_CHARS:
+            combined_input = combined_input[:MAX_TOTAL_CHARS] + "\n..."
+
+        # Use the summarizer to generate a daily rollup
+        cfg = config_manager.config.summarization
+        summarizer = HybridSummarizer(
+            model=cfg.model,
+            ollama_host=cfg.ollama_host,
+            summarization_mode=cfg.summarization_mode,
+        )
+
+        if not summarizer.is_available():
+            return jsonify({'error': 'Summarizer not available (check Ollama)'}), 503
+
+        # Create a prompt for daily synthesis
+        prompt = f"""Below are activity summaries from throughout the day. Write a 2-3 sentence high-level summary of the entire day's work.
+
+Activity summaries:
+{combined_input}
+
+Write a concise daily summary (2-3 sentences max) focusing on the main accomplishments and activities. Output ONLY the summary, no preamble."""
+
+        # Call Ollama directly for this synthesis
+        import requests
+        response = requests.post(
+            f"{cfg.ollama_host}/api/generate",
+            json={
+                "model": cfg.model,
+                "prompt": prompt,
+                "stream": False,
+            },
+            timeout=120,
+        )
+        response.raise_for_status()
+        daily_summary = response.json().get('response', '').strip()
+
+        # Save to database
+        storage.save_daily_summary(date, daily_summary)
+
+        return jsonify({
+            'status': 'success',
+            'summary': daily_summary,
+            'source_count': len(summaries),
+        })
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': f'Ollama request failed: {e}'}), 503
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ==================== Report Generation API ====================
 
 # Global report generator and exporter (lazy initialized)
@@ -1348,7 +1960,13 @@ def get_report_generator():
         from tracker.reports import ReportGenerator
         storage = ActivityStorage()
         try:
-            summarizer = HybridSummarizer()
+            # Use configured model and host from settings
+            cfg = config_manager.config.summarization
+            summarizer = HybridSummarizer(
+                model=cfg.model,
+                ollama_host=cfg.ollama_host,
+                summarization_mode=cfg.summarization_mode,
+            )
         except Exception:
             summarizer = None
         _report_generator = ReportGenerator(storage, summarizer, config_manager)
