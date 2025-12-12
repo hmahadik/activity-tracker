@@ -707,6 +707,7 @@ chmod 644 ~/activity-tracker-data/activity.db
 - [x] **Window Focus Tracking**: Real-time app/window usage with duration metrics
 - [x] **Report Generation**: Natural language time ranges with multiple export formats
 - [x] **Thumbnails**: Fast-loading timeline with 200px thumbnail previews
+- [x] **Generate Missing**: Backfill summaries for any day in frequency-based batches
 
 ### Planned
 - [ ] **Wayland Support**: Add sway/wlroots integration for window information

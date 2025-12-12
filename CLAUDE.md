@@ -274,7 +274,7 @@ activity-tracker/
   - Removed `project=` parameter from summary save calls
   - `project` column kept in DB for backward compatibility but not populated
 
-### 2025-12-12 - Phase 9: Report Generation Cleanup
+### 2025-12-12 - Phase 9: Report Generation & UI Cleanup
 - **Removed project detection from reports.py**:
   - Removed `ProjectDetector` import and usage
   - Removed `separate_projects` parameter from `generate()` method
@@ -287,7 +287,20 @@ activity-tracker/
 - **Removed project detection from web/app.py**:
   - Removed `ProjectDetector` import
   - Removed project-based filtering in summary details endpoint
-  - `api_get_summaries_by_project` endpoint still works but groups under 'unknown' (backward compatible)
+- **Fixed window geometry parsing**:
+  - `isdigit()` returned False for negative numbers (e.g., "-100")
+  - Fixed to use try/except int() conversion for proper negative coordinate handling
+- **Fixed "Generate Missing" functionality**:
+  - Now batches screenshots by `frequency_minutes` setting (e.g., 15-minute chunks)
+  - Includes all unsummarized screenshots regardless of session linkage (`require_session=False`)
+  - Added `date` parameter to only process screenshots from the selected day
+  - Fixed summary deletion to also remove links from `threshold_summary_screenshots` table
+  - Cleaned up 5,327 orphaned screenshot links from previous deletions
+- **Removed project UI elements**:
+  - Removed project badge CSS and `projectColor()` function from timeline.html
+  - Removed "Project" column from summary table
+  - Timeline lane events now use consistent accent color and "AI Summary" label
+  - Removed project badge from summary_detail.html
 
 ## Future Improvements
 - **Database normalization**: Unify `threshold_summaries` and `daily_summaries` into single `summaries` table with type field (threshold, hourly, daily, weekly, custom), plus separate `prompts` table for API request storage. Supports hierarchical relationships (daily→hourly→threshold).
