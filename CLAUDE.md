@@ -274,6 +274,21 @@ activity-tracker/
   - Removed `project=` parameter from summary save calls
   - `project` column kept in DB for backward compatibility but not populated
 
+### 2025-12-12 - Phase 9: Report Generation Cleanup
+- **Removed project detection from reports.py**:
+  - Removed `ProjectDetector` import and usage
+  - Removed `separate_projects` parameter from `generate()` method
+  - Removed `_generate_project_sections()` and `_generate_project_aware_executive_summary()` methods
+  - Reports now synthesize from existing LLM summaries (which already contain interpreted activity context)
+- **Added focus context to reports**:
+  - Added `_build_focus_context()` helper to aggregate app/window usage from focus events
+  - Report prompts now include app usage breakdown for additional context
+  - Updated prompts with guidance: "Do NOT assume different apps/windows are related unless clearly same project"
+- **Removed project detection from web/app.py**:
+  - Removed `ProjectDetector` import
+  - Removed project-based filtering in summary details endpoint
+  - `api_get_summaries_by_project` endpoint still works but groups under 'unknown' (backward compatible)
+
 ## Future Improvements
 - **Database normalization**: Unify `threshold_summaries` and `daily_summaries` into single `summaries` table with type field (threshold, hourly, daily, weekly, custom), plus separate `prompts` table for API request storage. Supports hierarchical relationships (daily→hourly→threshold).
 

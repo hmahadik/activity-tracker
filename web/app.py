@@ -15,7 +15,6 @@ from tracker.sessions import SessionManager
 from tracker.vision import HybridSummarizer
 from tracker.config import get_config_manager, Config
 from tracker.monitors import get_monitors
-from tracker.project_detector import ProjectDetector
 from dataclasses import asdict
 
 app = Flask(__name__)
@@ -1663,32 +1662,9 @@ def api_get_summary_detail(summary_id):
                     window_durations[title] = 0
                 window_durations[title] += duration
 
-        # Filter window durations by project if this is a project-specific summary
-        project_name = summary.get('project')
-        if project_name and project_name != 'unknown':
-            detector = ProjectDetector()
-            filtered_durations = {}
-            for event in focus_events:
-                title = event.get('window_title', 'Unknown')
-                app_name = event.get('app_name', '')
-
-                # Check if this window belongs to the summary's project
-                detected = detector.detect(title, app_name)
-                if detected.name != project_name:
-                    continue
-
-                # Use clipped duration
-                event_start = datetime.fromisoformat(event['start_time']) if isinstance(event['start_time'], str) else event['start_time']
-                event_end = datetime.fromisoformat(event['end_time']) if isinstance(event['end_time'], str) else event['end_time']
-                clipped_start = max(event_start, start_dt)
-                clipped_end = min(event_end, end_dt)
-                if clipped_end > clipped_start:
-                    duration = (clipped_end - clipped_start).total_seconds()
-                    if title not in filtered_durations:
-                        filtered_durations[title] = 0
-                    filtered_durations[title] += duration
-
-            window_durations = filtered_durations
+        # Note: Project-based filtering was removed in Phase 8.
+        # The LLM now interprets raw app/window usage data directly.
+        # The 'project' column in summaries is no longer populated.
 
         # Sort by duration descending
         window_durations_list = [
