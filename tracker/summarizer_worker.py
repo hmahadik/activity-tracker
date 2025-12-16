@@ -395,7 +395,7 @@ class SummarizerWorker:
 
         # Generate summary
         try:
-            summary, inference_ms, prompt_text, screenshot_ids_used = self.summarizer.summarize_session(
+            summary, inference_ms, prompt_text, screenshot_ids_used, explanation, confidence = self.summarizer.summarize_session(
                 screenshots=screenshots,
                 ocr_texts=ocr_texts,
                 previous_summary=previous_summary,
@@ -428,9 +428,11 @@ class SummarizerWorker:
             config_snapshot=config_snapshot,
             inference_ms=inference_ms,
             prompt_text=prompt_text,
+            explanation=explanation,
+            confidence=confidence,
         )
 
-        logger.info(f"Saved summary {summary_id}: {summary[:80]}...")
+        logger.info(f"Saved summary {summary_id} (conf={confidence:.2f}): {summary[:80]}...")
 
     def _do_summarize_screenshots(self, screenshots: List[Dict]):
         """Generate summary for a batch of screenshots (legacy method).
@@ -468,7 +470,7 @@ class SummarizerWorker:
 
         # Generate summary
         try:
-            summary, inference_ms, prompt_text, screenshot_ids_used = self.summarizer.summarize_session(
+            summary, inference_ms, prompt_text, screenshot_ids_used, explanation, confidence = self.summarizer.summarize_session(
                 screenshots=screenshots,
                 ocr_texts=ocr_texts,
                 previous_summary=previous_summary,
@@ -506,9 +508,11 @@ class SummarizerWorker:
             config_snapshot=config_snapshot,
             inference_ms=inference_ms,
             prompt_text=prompt_text,
+            explanation=explanation,
+            confidence=confidence,
         )
 
-        logger.info(f"Saved summary {summary_id}: {summary[:80]}...")
+        logger.info(f"Saved summary {summary_id} (conf={confidence:.2f}): {summary[:80]}...")
 
     def _do_regenerate(self, summary_id: int):
         """Regenerate an existing summary with current settings.
@@ -548,7 +552,7 @@ class SummarizerWorker:
         # Don't use previous summary for regeneration
         start_time = time.time()
         try:
-            summary, inference_ms, prompt_text, _ = self.summarizer.summarize_session(
+            summary, inference_ms, prompt_text, _, explanation, confidence = self.summarizer.summarize_session(
                 screenshots=screenshots,
                 ocr_texts=ocr_texts,
                 previous_summary=None,
@@ -586,9 +590,11 @@ class SummarizerWorker:
             inference_ms=inference_ms,
             regenerated_from=root_id,
             prompt_text=prompt_text,
+            explanation=explanation,
+            confidence=confidence,
         )
 
-        logger.info(f"Regenerated summary {summary_id} -> {new_id}: {summary[:100]}...")
+        logger.info(f"Regenerated summary {summary_id} -> {new_id} (conf={confidence:.2f}): {summary[:100]}...")
 
     def _gather_ocr(self, screenshots: List[Dict]) -> List[Dict]:
         """Gather OCR texts for unique window titles.

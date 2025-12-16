@@ -309,12 +309,20 @@ class ActivityStorage:
                     CREATE INDEX IF NOT EXISTS idx_threshold_summary_project
                     ON threshold_summaries(project)
                 """)
-                logger.info("Added 'project' column to threshold_summaries table")
+                print("Added 'project' column to threshold_summaries table")
 
             # Add prompt_text column to threshold_summaries if not exists (migration)
             if 'prompt_text' not in columns:
                 conn.execute("ALTER TABLE threshold_summaries ADD COLUMN prompt_text TEXT")
-                logger.info("Added 'prompt_text' column to threshold_summaries table")
+                print("Added 'prompt_text' column to threshold_summaries table")
+
+            # Add explanation and confidence columns for structured summaries (migration)
+            if 'explanation' not in columns:
+                conn.execute("ALTER TABLE threshold_summaries ADD COLUMN explanation TEXT")
+                print("Added 'explanation' column to threshold_summaries table")
+            if 'confidence' not in columns:
+                conn.execute("ALTER TABLE threshold_summaries ADD COLUMN confidence REAL")
+                print("Added 'confidence' column to threshold_summaries table")
 
             # Junction table for threshold summaries <-> screenshots (proper M:N relationship)
             conn.execute("""
@@ -1387,7 +1395,9 @@ class ActivityStorage:
         inference_ms: int,
         regenerated_from: int = None,
         project: str = None,
-        prompt_text: str = None
+        prompt_text: str = None,
+        explanation: str = None,
+        confidence: float = None
     ) -> int:
         """Save a new threshold-based summary.
 
@@ -1402,6 +1412,8 @@ class ActivityStorage:
             regenerated_from: ID of original summary if this is a regeneration
             project: Detected project context name
             prompt_text: The full prompt text sent to the LLM (for debugging)
+            explanation: Model's explanation of what it observed
+            confidence: Model's confidence score (0.0-1.0)
 
         Returns:
             ID of the new summary record.
@@ -1411,8 +1423,9 @@ class ActivityStorage:
                 """
                 INSERT INTO threshold_summaries
                     (start_time, end_time, summary, screenshot_ids, screenshot_count,
-                     model_used, config_snapshot, inference_time_ms, regenerated_from, project, prompt_text)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     model_used, config_snapshot, inference_time_ms, regenerated_from, project, prompt_text,
+                     explanation, confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     start_time,
@@ -1426,6 +1439,8 @@ class ActivityStorage:
                     regenerated_from,
                     project,
                     prompt_text,
+                    explanation,
+                    confidence,
                 ),
             )
             summary_id = cursor.lastrowid
@@ -1452,7 +1467,8 @@ class ActivityStorage:
                 """
                 SELECT id, start_time, end_time, summary, screenshot_ids,
                        screenshot_count, model_used, config_snapshot,
-                       inference_time_ms, created_at, regenerated_from, project, prompt_text
+                       inference_time_ms, created_at, regenerated_from, project, prompt_text,
+                       explanation, confidence
                 FROM threshold_summaries
                 WHERE id = ?
                 """,
@@ -1491,7 +1507,8 @@ class ActivityStorage:
                 """
                 SELECT id, start_time, end_time, summary, screenshot_ids,
                        screenshot_count, model_used, config_snapshot,
-                       inference_time_ms, created_at, regenerated_from, project
+                       inference_time_ms, created_at, regenerated_from, project,
+                       explanation, confidence
                 FROM threshold_summaries
                 WHERE date(start_time) = ?
                 ORDER BY start_time ASC
@@ -1521,7 +1538,8 @@ class ActivityStorage:
                 """
                 SELECT id, start_time, end_time, summary, screenshot_ids,
                        screenshot_count, model_used, config_snapshot,
-                       inference_time_ms, created_at, regenerated_from, project
+                       inference_time_ms, created_at, regenerated_from, project,
+                       explanation, confidence
                 FROM threshold_summaries
                 WHERE id = ? OR regenerated_from = ?
                 ORDER BY created_at ASC

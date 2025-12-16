@@ -2013,6 +2013,76 @@
             color: var(--text);
             line-height: 1.6;
         }
+
+        /* Confidence badges */
+        .confidence-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .conf-high {
+            background: rgba(46, 160, 67, 0.2);
+            color: #2ea043;
+        }
+        .conf-medium {
+            background: rgba(187, 128, 9, 0.2);
+            color: #bb8009;
+        }
+        .conf-low {
+            background: rgba(218, 54, 51, 0.2);
+            color: #da3633;
+        }
+
+        /* Explanation icon */
+        .explanation-icon {
+            cursor: pointer;
+            margin-left: 6px;
+            opacity: 0.6;
+            font-size: 0.9rem;
+        }
+        .explanation-icon:hover {
+            opacity: 1;
+        }
+
+        .summary-confidence {
+            text-align: center;
+        }
+
+        /* Explanation modal */
+        .explanation-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+        .explanation-modal-content {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            max-width: 500px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .explanation-modal-content h3 {
+            margin-top: 0;
+            margin-bottom: 12px;
+        }
+        .explanation-modal-content p {
+            margin: 0;
+            line-height: 1.6;
+        }
+        .explanation-modal-content button {
+            margin-top: 16px;
+        }
     </style>
 </head>
 <body>
@@ -3983,6 +4053,7 @@
                                 <th>Time</th>
                                 <th>Dur</th>
                                 <th>Summary</th>
+                                <th style="width: 60px;">Conf</th>
                                 <th style="width: 80px;">Screens</th>
                             </tr>
                         </thead>
@@ -4019,6 +4090,22 @@
                     const durationMins = Math.round(durationMs / 60000);
                     const durationStr = durationMins < 1 ? '<1m' : `${durationMins}m`;
 
+                    // Confidence indicator
+                    const conf = summary.confidence;
+                    let confClass = 'conf-medium';
+                    let confTitle = 'Moderate confidence';
+                    if (conf >= 0.8) {
+                        confClass = 'conf-high';
+                        confTitle = 'High confidence';
+                    } else if (conf < 0.5) {
+                        confClass = 'conf-low';
+                        confTitle = 'Low confidence';
+                    }
+                    const confDisplay = conf !== null && conf !== undefined ? `<span class="confidence-badge ${confClass}" title="${confTitle}: ${(conf * 100).toFixed(0)}%">${(conf * 100).toFixed(0)}%</span>` : '';
+
+                    // Explanation tooltip (escape quotes for HTML attribute)
+                    const explanationEscaped = (summary.explanation || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
                     html += `
                         <tr data-summary-id="${summary.id}" data-hour="${hour}" onclick="handleRowClick(event, ${summary.id})">
                             <td onclick="event.stopPropagation()">
@@ -4026,7 +4113,11 @@
                             </td>
                             <td class="summary-time">${startTime}</td>
                             <td class="summary-duration">${durationStr}</td>
-                            <td class="summary-text-cell" title="${summary.summary}">${summary.summary}</td>
+                            <td class="summary-text-cell">
+                                <span title="${summary.summary}">${summary.summary}</span>
+                                ${summary.explanation ? `<span class="explanation-icon" onclick="event.stopPropagation(); showExplanation('${explanationEscaped}')" title="Show explanation">ℹ️</span>` : ''}
+                            </td>
+                            <td class="summary-confidence">${confDisplay}</td>
                             <td class="summary-screens">
                                 <span class="screen-count" onclick="event.stopPropagation(); viewSummaryScreenshots(${summary.id})" title="View screenshots">${summary.screenshot_count}</span>
                             </td>
@@ -4073,6 +4164,26 @@
             } catch (error) {
                 console.error('Failed to load screenshots:', error);
             }
+        }
+
+        // Show explanation modal
+        function showExplanation(explanation) {
+            // Unescape HTML entities
+            const text = explanation.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+
+            const modal = document.createElement('div');
+            modal.className = 'explanation-modal';
+            modal.innerHTML = `
+                <div class="explanation-modal-content">
+                    <h3>Model Explanation</h3>
+                    <p>${text}</p>
+                    <button onclick="this.closest('.explanation-modal').remove()">Close</button>
+                </div>
+            `;
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) modal.remove();
+            });
+            document.body.appendChild(modal);
         }
 
         // View screenshots for a specific summary

@@ -257,7 +257,7 @@ class HybridSummarizer:
         ocr_texts: list[dict],
         previous_summary: str = None,
         focus_events: list[dict] = None,
-    ) -> tuple[str, int, str, list]:
+    ) -> tuple[str, int, str, list, str, float]:
         """
         Summarize a session with context continuity and focus tracking data.
 
@@ -272,7 +272,8 @@ class HybridSummarizer:
             focus_events: Optional list of focus events from storage.get_focus_events_in_range().
 
         Returns:
-            Tuple of (summary text, inference time in ms, prompt text, screenshot IDs used).
+            Tuple of (summary text, inference time in ms, prompt text, screenshot IDs used,
+            explanation, confidence).
 
         Raises:
             ValueError: If screenshots is empty.
@@ -378,25 +379,29 @@ class HybridSummarizer:
             basis = f"{basis_parts[0]}, {basis_parts[1]}, and {basis_parts[2]}"
 
         prompt_parts.extend([
-            f"Based on {basis}, write 1-2 sentences (max 25 words) describing the PRIMARY activities.",
+            f"Based on {basis}, describe the PRIMARY activities.",
             "",
-            "IMPORTANT: Output ONLY the summary sentence(s). No explanation, no reasoning, no preamble.",
+            "Your response MUST follow this exact format:",
             "",
-            "Guidelines:",
-            "- Focus on where the most time was spent",
-            "- Use specific project names, filenames, or URLs visible in the content",
-            '- Format: "[Action verb] [what] in/for [project/context]"',
-            "- If multiple distinct activities, mention the dominant ones",
-            "- Do NOT assume different apps/windows are related unless clearly the same project",
+            "SUMMARY: [1-2 sentences, max 25 words describing the main activities]",
             "",
-            "Example formats (DO NOT copy these - describe what YOU see):",
-            "- Editing [filename] in [project]. Researching [topic] in browser.",
-            "- Debugging [issue] in [project] using [tool].",
+            "EXPLANATION: [What you observed that led to this summary. Mention specific windows, text, or visual elements. If activity doesn't clearly belong to a project, say so.]",
             "",
-            'Be specific. Avoid generic descriptions like "coding" or "browsing".',
-            "CRITICAL: Describe ONLY what is visible in the provided content. Never invent or assume activities.",
+            "CONFIDENCE: [A number from 0.0 to 1.0. 1.0 = very confident with clear evidence. 0.5 = moderate, some ambiguity. 0.0 = guessing, unclear content]",
             "",
-            "Your response (just the summary, nothing else):",
+            "Guidelines for SUMMARY:",
+            "- If activity clearly belongs to a project, mention the project name",
+            "- If activity is general (browsing, reading, communication), describe the activity type",
+            "- If unclear, use generic description rather than guessing a project",
+            "- Format: \"[Action verb] [what] in/for [project/context]\"",
+            "",
+            "Examples of good SUMMARY lines (DO NOT copy - describe what YOU see):",
+            "- Clear project: \"Implementing focus tracking in activity-tracker daemon.py\"",
+            "- General activity: \"Reading documentation and browsing Stack Overflow\"",
+            "- Communication: \"Slack conversations and email correspondence\"",
+            "- Unclear: \"Code review and documentation reading\"",
+            "",
+            "CRITICAL: Describe ONLY what is visible. Never invent or assume activities.",
         ])
 
         prompt = "\n".join(prompt_parts)
@@ -426,7 +431,66 @@ class HybridSummarizer:
         response = self._call_ollama_api(prompt, images_base64 if images_base64 else None)
 
         inference_ms = int((time.time() - start_time) * 1000)
-        return response.strip(), inference_ms, api_request_info, screenshot_ids_used
+
+        # Parse structured response
+        summary, explanation, confidence = self._parse_summary_response(response)
+
+        return summary, inference_ms, api_request_info, screenshot_ids_used, explanation, confidence
+
+    def _parse_summary_response(self, response: str) -> tuple[str, str, float]:
+        """Parse structured response into (summary, explanation, confidence).
+
+        Expected format:
+            SUMMARY: ...
+            EXPLANATION: ...
+            CONFIDENCE: 0.X
+
+        Args:
+            response: Raw response from LLM.
+
+        Returns:
+            Tuple of (summary, explanation, confidence).
+            Falls back gracefully if parsing fails.
+        """
+        summary = ""
+        explanation = ""
+        confidence = 0.5  # Default if not parseable
+
+        lines = response.strip().split('\n')
+        current_section = None
+
+        for line in lines:
+            line_stripped = line.strip()
+            line_upper = line_stripped.upper()
+
+            if line_upper.startswith('SUMMARY:'):
+                summary = line_stripped[8:].strip()
+                current_section = 'summary'
+            elif line_upper.startswith('EXPLANATION:'):
+                explanation = line_stripped[12:].strip()
+                current_section = 'explanation'
+            elif line_upper.startswith('CONFIDENCE:'):
+                conf_str = line_stripped[11:].strip()
+                try:
+                    confidence = float(conf_str)
+                    confidence = max(0.0, min(1.0, confidence))
+                except ValueError:
+                    pass
+                current_section = 'confidence'
+            elif current_section == 'summary' and line_stripped:
+                # Multi-line summary
+                summary += ' ' + line_stripped
+            elif current_section == 'explanation' and line_stripped:
+                # Multi-line explanation
+                explanation += ' ' + line_stripped
+
+        # Fallback: if no structured format, use entire response as summary
+        if not summary:
+            summary = response.strip()
+            explanation = "Model did not follow structured format."
+            confidence = 0.3
+
+        return summary.strip(), explanation.strip(), confidence
 
     def _build_focus_context(self, focus_events: list[dict]) -> str:
         """
