@@ -361,13 +361,21 @@ class HybridSummarizer:
             prompt_parts.append(f"{len(images_base64)} screenshots attached showing actual screen content.")
             prompt_parts.append("")
 
-        # Adjust guidance based on what content is available
-        if images_base64 and ocr_section:
-            basis = "the time breakdown, OCR text, and screenshots"
-        elif images_base64:
-            basis = "the time breakdown and screenshots"
+        # Adjust guidance based on what content is actually available
+        basis_parts = []
+        if focus_context:
+            basis_parts.append("the time breakdown")
+        if ocr_section:
+            basis_parts.append("OCR text")
+        if images_base64:
+            basis_parts.append("screenshots")
+
+        if len(basis_parts) == 1:
+            basis = basis_parts[0]
+        elif len(basis_parts) == 2:
+            basis = f"{basis_parts[0]} and {basis_parts[1]}"
         else:
-            basis = "the time breakdown and OCR text"
+            basis = f"{basis_parts[0]}, {basis_parts[1]}, and {basis_parts[2]}"
 
         prompt_parts.extend([
             f"Based on {basis}, write 1-2 sentences (max 25 words) describing the PRIMARY activities.",
@@ -381,11 +389,12 @@ class HybridSummarizer:
             "- If multiple distinct activities, mention the dominant ones",
             "- Do NOT assume different apps/windows are related unless clearly the same project",
             "",
-            "Good examples (output exactly like this):",
-            "Implementing window focus tracking in activity-tracker daemon.py. Reviewing PR #1234 for authentication service and responding to comments",
-            "Debugging API endpoint issues in Acusight backend with Docker logs",
+            "Example formats (DO NOT copy these - describe what YOU see):",
+            "- Editing [filename] in [project]. Researching [topic] in browser.",
+            "- Debugging [issue] in [project] using [tool].",
             "",
             'Be specific. Avoid generic descriptions like "coding" or "browsing".',
+            "CRITICAL: Describe ONLY what is visible in the provided content. Never invent or assume activities.",
             "",
             "Your response (just the summary, nothing else):",
         ])
