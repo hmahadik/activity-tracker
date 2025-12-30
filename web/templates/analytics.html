@@ -548,9 +548,10 @@
                 </div>
             </div>
             <div class="chart-panel">
-                <h3>Confidence Distribution</h3>
+                <h3 id="confidenceChartLabel">Confidence Distribution</h3>
                 <div class="chart-container">
-                    <canvas id="confidenceChart"></canvas>
+                    <canvas id="confidenceChart" role="img" aria-labelledby="confidenceChartLabel" aria-describedby="confidenceChartDesc"></canvas>
+                    <p id="confidenceChartDesc" class="sr-only">Pie chart showing distribution of AI summary confidence levels</p>
                 </div>
             </div>
         </div>
@@ -589,17 +590,19 @@
         </div>
 
         <div class="chart-panel" style="margin-bottom: 20px;">
-            <h3>Focus Timeline</h3>
-            <div class="focus-timeline" id="focusTimeline"></div>
+            <h3 id="focusTimelineLabel">Focus Timeline</h3>
+            <div class="focus-timeline" id="focusTimeline" role="img" aria-labelledby="focusTimelineLabel" aria-describedby="focusTimelineDesc"></div>
+            <p id="focusTimelineDesc" class="sr-only">Visual timeline showing application usage throughout the day</p>
             <div class="timeline-legend" id="focusLegend"></div>
         </div>
 
         <!-- App Usage Section -->
         <div class="chart-row">
             <div class="chart-panel">
-                <h3>Top Applications</h3>
+                <h3 id="appUsageChartLabel">Top Applications</h3>
                 <div class="chart-container">
-                    <canvas id="appUsageChart"></canvas>
+                    <canvas id="appUsageChart" role="img" aria-labelledby="appUsageChartLabel" aria-describedby="appUsageChartDesc"></canvas>
+                    <p id="appUsageChartDesc" class="sr-only">Doughnut chart showing time spent in each application</p>
                 </div>
             </div>
             <div class="chart-panel">
@@ -623,9 +626,10 @@
 
         <!-- Activity Trend -->
         <div class="chart-panel" style="margin-top: 20px;">
-            <h3>Summary Generation Trend</h3>
+            <h3 id="trendChartLabel">Summary Generation Trend</h3>
             <div class="chart-container">
-                <canvas id="trendChart"></canvas>
+                <canvas id="trendChart" role="img" aria-labelledby="trendChartLabel" aria-describedby="trendChartDesc"></canvas>
+                <p id="trendChartDesc" class="sr-only">Bar chart showing number of AI summaries generated per day</p>
             </div>
         </div>
     </div>

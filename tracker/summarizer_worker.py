@@ -58,6 +58,7 @@ class SummarizerWorker:
         self._current_task: Optional[str] = None
         self._next_scheduled_run: Optional[datetime] = None
         self._last_summarized_end: Optional[datetime] = None  # Track last summarized period
+        self._last_daily_report_date: Optional[str] = None  # Track date of last daily report
 
     @property
     def summarizer(self):
@@ -298,11 +299,15 @@ class SummarizerWorker:
 
         Runs summarization at fixed clock times based on frequency_minutes.
         Also processes manual tasks from the queue (regenerate, force).
+        Additionally generates daily reports at midnight.
         """
         logger.info("SummarizerWorker run loop started")
 
         while self._running:
             now = datetime.now()
+
+            # Check if we should generate daily reports (at/after midnight)
+            self._maybe_generate_daily_reports(now)
 
             # Check if it's time for scheduled summarization
             if (self._next_scheduled_run and
@@ -373,6 +378,16 @@ class SummarizerWorker:
             f"Summarizing time range: {start_time.strftime('%H:%M')} - "
             f"{end_time.strftime('%H:%M')}"
         )
+
+        # Skip if a summary already exists for this time range (prevents duplicates)
+        start_iso = start_time.isoformat()
+        end_iso = end_time.isoformat()
+        if self.storage.has_summary_for_time_range(start_iso, end_iso):
+            logger.info(
+                f"Skipping - summary already exists for time range "
+                f"({start_time.strftime('%H:%M')} - {end_time.strftime('%H:%M')})"
+            )
+            return
 
         # Skip if user was AFK for the entire period
         if not self.storage.has_active_session_in_range(start_time, end_time):
@@ -445,10 +460,10 @@ class SummarizerWorker:
             'frequency_minutes': cfg.frequency_minutes,
         }
 
-        # Save to database
+        # Save to database (reuse ISO strings computed earlier for dedup check)
         summary_id = self.storage.save_threshold_summary(
-            start_time=start_time.isoformat(),
-            end_time=end_time.isoformat(),
+            start_time=start_iso,
+            end_time=end_iso,
             summary=summary,
             screenshot_ids=[s['id'] for s in screenshots],
             model=self.config.config.summarization.model,
@@ -786,3 +801,52 @@ class SummarizerWorker:
                 clipped.append(event_copy)
 
         return clipped
+
+    def _maybe_generate_daily_reports(self, now: datetime):
+        """Generate daily report for yesterday if not already generated.
+
+        Called from the run loop. Checks if we've crossed midnight and
+        if so, generates a cached daily report for the previous day.
+
+        Args:
+            now: Current datetime
+        """
+        # Only run if summarization is enabled (reuse the same config flag)
+        if not self.config.config.summarization.enabled:
+            return
+
+        # Get yesterday's date string
+        yesterday = (now - timedelta(days=1)).strftime('%Y-%m-%d')
+
+        # Skip if we already generated today's daily report
+        if self._last_daily_report_date == yesterday:
+            return
+
+        # Check if we have a cached report for yesterday already
+        existing = self.storage.get_cached_report('daily', yesterday)
+        if existing:
+            # Already have the report, just update tracking
+            self._last_daily_report_date = yesterday
+            return
+
+        # Generate the daily report for yesterday
+        logger.info(f"Generating daily report for {yesterday}")
+        self._current_task = 'daily_report'
+
+        try:
+            from .reports import ReportGenerator
+            generator = ReportGenerator(self.storage, self.summarizer, self.config)
+            result = generator.generate_daily_report(yesterday)
+
+            if result:
+                logger.info(f"Generated daily report for {yesterday}: {result.get('executive_summary', '')[:80]}...")
+            else:
+                logger.info(f"No activity found for {yesterday}, skipping daily report")
+
+            # Mark as done for today
+            self._last_daily_report_date = yesterday
+
+        except Exception as e:
+            logger.error(f"Failed to generate daily report for {yesterday}: {e}", exc_info=True)
+        finally:
+            self._current_task = None

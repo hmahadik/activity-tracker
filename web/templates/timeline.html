@@ -258,6 +258,11 @@
             font-size: 0.85rem;
             transition: all 0.2s;
             position: relative;
+            /* Button reset for accessibility */
+            font-family: inherit;
+            color: inherit;
+            padding: 0;
+            text-align: center;
         }
 
         .calendar-day:hover {
@@ -423,6 +428,7 @@
         .hour-header {
             padding: 15px 20px;
             background: var(--surface);
+            border: none;
             border-bottom: 1px solid var(--border);
             cursor: pointer;
             display: flex;
@@ -430,6 +436,12 @@
             align-items: center;
             user-select: none;
             transition: background 0.2s;
+            /* Button reset for accessibility */
+            width: 100%;
+            font-family: inherit;
+            font-size: inherit;
+            color: inherit;
+            text-align: left;
         }
 
         .hour-header:hover {
@@ -2052,31 +2064,62 @@
             text-align: center;
         }
 
-        /* Tags display */
-        .summary-tags {
-            max-width: 200px;
-            overflow: hidden;
+        /* Tags section below hourly chart */
+        .tags-section {
+            margin-top: 20px;
+            padding-top: 15px;
+            border-top: 1px solid var(--border);
+        }
+        .tags-section h3 {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--muted);
+            margin-bottom: 10px;
+        }
+        .tags-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
         }
         .tag-badge {
-            display: inline-block;
-            padding: 2px 6px;
-            margin: 1px 2px;
-            border-radius: 10px;
-            font-size: 0.7rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
             background: rgba(88, 166, 255, 0.15);
             color: var(--accent, #58a6ff);
             white-space: nowrap;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid transparent;
         }
         .tag-badge:hover {
             background: rgba(88, 166, 255, 0.25);
+            border-color: var(--accent);
         }
-        .tags-more {
-            font-size: 0.7rem;
-            color: var(--muted);
-            cursor: pointer;
+        .tag-badge.active {
+            background: var(--accent);
+            color: var(--bg);
+            border-color: var(--accent);
         }
-        .tags-more:hover {
-            color: var(--accent);
+        .tag-badge .tag-count {
+            font-size: 0.65rem;
+            opacity: 0.7;
+            background: rgba(0,0,0,0.2);
+            padding: 1px 5px;
+            border-radius: 8px;
+        }
+        .tag-badge.active .tag-count {
+            background: rgba(255,255,255,0.2);
+        }
+        /* Highlight rows matching selected tag */
+        .summaries-table tr.tag-highlight {
+            background: rgba(88, 166, 255, 0.1);
+        }
+        .summaries-table tr.tag-dimmed {
+            opacity: 0.4;
         }
 
         /* Explanation modal */
@@ -2177,6 +2220,10 @@
                     <div class="chart-container" style="margin-top: 15px;">
                         <canvas id="hourlyChart"></canvas>
                     </div>
+                    <div id="tagsSection" class="tags-section" style="display: none;">
+                        <h3>Tags</h3>
+                        <div id="tagsList" class="tags-list"></div>
+                    </div>
                 </div>
             </div>
 
@@ -2207,12 +2254,13 @@
     </div>
 
     <!-- Image Modal -->
-    <div id="imageModal" class="modal">
-        <span class="modal-close">&times;</span>
+    <div id="imageModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-hidden="true">
+        <h2 id="modalTitle" class="sr-only">Screenshot Viewer</h2>
+        <button class="modal-close" aria-label="Close screenshot viewer">&times;</button>
         <div class="modal-content">
-            <div class="modal-nav modal-nav-prev" id="modalPrev">←</div>
+            <button class="modal-nav modal-nav-prev" id="modalPrev" aria-label="Previous screenshot">←</button>
             <img id="modalImage" class="modal-image" alt="Full size screenshot">
-            <div class="modal-nav modal-nav-next" id="modalNext">→</div>
+            <button class="modal-nav modal-nav-next" id="modalNext" aria-label="Next screenshot">→</button>
         </div>
         <div class="modal-info">
             <div class="modal-metadata">
@@ -2967,7 +3015,9 @@
 
             // Add days
             state.calendarData.forEach(day => {
-                const dayElement = document.createElement('div');
+                // Use button for keyboard accessibility
+                const dayElement = document.createElement('button');
+                dayElement.type = 'button';
                 dayElement.className = 'calendar-day';
 
                 const dayNumber = parseInt(day.date.split('-')[2]);
@@ -2981,12 +3031,18 @@
                 // Mark selected
                 if (day.date === state.selectedDate) {
                     dayElement.classList.add('selected');
+                    dayElement.setAttribute('aria-current', 'date');
                 }
+
+                // Accessible label
+                const dateObj = new Date(day.date + 'T12:00:00');
+                const dateLabel = dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+                dayElement.setAttribute('aria-label', `${dateLabel}, ${day.screenshot_count} screenshots, ${day.active_hours} active hours`);
 
                 // Click handler
                 dayElement.addEventListener('click', () => selectDate(day.date));
 
-                // Tooltip
+                // Tooltip for mouse users
                 dayElement.title = `${day.date}\n${day.screenshot_count} screenshots\n${day.active_hours} active hours`;
 
                 grid.appendChild(dayElement);
@@ -3010,8 +3066,10 @@
             // Update calendar UI
             document.querySelectorAll('.calendar-day').forEach(day => {
                 day.classList.remove('selected');
+                day.removeAttribute('aria-current');
                 if (day.dataset.date === dateStr) {
                     day.classList.add('selected');
+                    day.setAttribute('aria-current', 'date');
                 }
             });
 
@@ -3381,18 +3439,22 @@
                     groupDiv.className = 'hour-group';
                     groupDiv.dataset.hour = hour;
 
-                    const headerDiv = document.createElement('div');
+                    const headerDiv = document.createElement('button');
+                    headerDiv.type = 'button';
                     headerDiv.className = 'hour-header';
+                    headerDiv.setAttribute('aria-expanded', 'true');
+                    headerDiv.setAttribute('aria-controls', `hour-content-${hour}`);
                     headerDiv.innerHTML = `
                         <div class="hour-title-wrapper">
                             <span class="hour-title">${hourStr} - ${hourEnd}</span>
-                            ${hourSummary ? '<span class="summary-badge">✨</span>' : ''}
+                            ${hourSummary ? '<span class="summary-badge" aria-hidden="true">✨</span>' : ''}
                         </div>
                         <span class="hour-count">${screenshots.length} screenshot${screenshots.length !== 1 ? 's' : ''}</span>
-                        <span class="hour-toggle">▼</span>
+                        <span class="hour-toggle" aria-hidden="true">▼</span>
                     `;
                     headerDiv.onclick = () => {
-                        groupDiv.classList.toggle('collapsed');
+                        const isCollapsed = groupDiv.classList.toggle('collapsed');
+                        headerDiv.setAttribute('aria-expanded', !isCollapsed);
                     };
 
                     // Summary section
@@ -3414,6 +3476,7 @@
 
                     const contentDiv = document.createElement('div');
                     contentDiv.className = 'hour-content';
+                    contentDiv.id = `hour-content-${hour}`;
 
                     screenshots.forEach(screenshot => {
                         const time = new Date(screenshot.timestamp * 1000).toLocaleTimeString();
@@ -3513,14 +3576,25 @@
             function showModal(screenshotId) {
                 const index = modalState.screenshots.findIndex(s => s.id === screenshotId);
                 if (index !== -1) {
+                    // Store the element that triggered the modal for focus return
+                    modalState.triggerElement = document.activeElement;
                     updateModalContent(index);
                     modal.classList.add('active');
+                    modal.setAttribute('aria-hidden', 'false');
+                    // Focus the close button for accessibility
+                    closeBtn.focus();
                 }
             }
 
             function closeModal() {
                 modal.classList.remove('active');
+                modal.setAttribute('aria-hidden', 'true');
                 modalState.currentIndex = -1;
+                // Return focus to the element that opened the modal
+                if (modalState.triggerElement) {
+                    modalState.triggerElement.focus();
+                    modalState.triggerElement = null;
+                }
                 // Clean up keyboard handler
                 if (window.modalKeyHandler) {
                     document.removeEventListener('keydown', window.modalKeyHandler);
@@ -3544,11 +3618,16 @@
             function showModalWithScreenshots(screenshotId, screenshots) {
                 // Replace screenshots array for navigation
                 modalState.screenshots = screenshots;
+                // Store the element that triggered the modal for focus return
+                modalState.triggerElement = document.activeElement;
 
                 const index = screenshots.findIndex(s => s.id === screenshotId);
                 if (index !== -1) {
                     updateModalContent(index);
                     modal.classList.add('active');
+                    modal.setAttribute('aria-hidden', 'false');
+                    // Focus the close button for accessibility
+                    closeBtn.focus();
                 }
             }
 
@@ -4054,7 +4133,6 @@
                                 <th>Time</th>
                                 <th>Summary</th>
                                 <th style="width: 60px;">Conf</th>
-                                <th style="width: 150px;">Tags</th>
                                 <th style="width: 80px;">Screens</th>
                             </tr>
                         </thead>
@@ -4107,21 +4185,11 @@
                     // Explanation tooltip (escape quotes for HTML attribute)
                     const explanationEscaped = (summary.explanation || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
-                    // Tags display (show first 3, with +N more indicator)
+                    // Tags for data attribute (used by tags section for filtering)
                     const tags = summary.tags || [];
-                    const maxVisibleTags = 3;
-                    let tagsHtml = '';
-                    if (tags.length > 0) {
-                        const visibleTags = tags.slice(0, maxVisibleTags);
-                        const hiddenCount = tags.length - maxVisibleTags;
-                        tagsHtml = visibleTags.map(t => `<span class="tag-badge">${t}</span>`).join('');
-                        if (hiddenCount > 0) {
-                            tagsHtml += `<span class="tags-more" title="${tags.slice(maxVisibleTags).join(', ')}">+${hiddenCount}</span>`;
-                        }
-                    }
 
                     html += `
-                        <tr data-summary-id="${summary.id}" data-hour="${hour}" onclick="handleRowClick(event, ${summary.id})">
+                        <tr data-summary-id="${summary.id}" data-hour="${hour}" data-tags="${tags.join(',')}" onclick="handleRowClick(event, ${summary.id})">
                             <td onclick="event.stopPropagation()">
                                 <input type="checkbox" class="summary-checkbox" data-id="${summary.id}" onclick="handleCheckboxClick(event, ${summary.id})">
                             </td>
@@ -4131,7 +4199,6 @@
                                 ${summary.explanation ? `<span class="explanation-icon" onclick="event.stopPropagation(); showExplanation('${explanationEscaped}')" title="Show explanation">ℹ️</span>` : ''}
                             </td>
                             <td class="summary-confidence">${confDisplay}</td>
-                            <td class="summary-tags">${tagsHtml}</td>
                             <td class="summary-screens">
                                 <span class="screen-count" onclick="event.stopPropagation(); viewSummaryScreenshots(${summary.id})" title="View screenshots">${summary.screenshot_count}</span>
                             </td>
@@ -4154,6 +4221,88 @@
 
             // Track current highlighted hour
             state.highlightedHour = null;
+
+            // Render tags section
+            renderTagsSection(summaries);
+        }
+
+        // Render the tags section below the hourly chart
+        function renderTagsSection(summaries) {
+            const tagsSection = document.getElementById('tagsSection');
+            const tagsList = document.getElementById('tagsList');
+
+            // Aggregate all tags with counts
+            const tagCounts = {};
+            summaries.forEach(s => {
+                (s.tags || []).forEach(tag => {
+                    tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+                });
+            });
+
+            // Sort by count (descending), then alphabetically
+            const sortedTags = Object.entries(tagCounts)
+                .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+
+            if (sortedTags.length === 0) {
+                tagsSection.style.display = 'none';
+                return;
+            }
+
+            tagsSection.style.display = 'block';
+            tagsList.innerHTML = sortedTags.map(([tag, count]) =>
+                `<span class="tag-badge" data-tag="${tag}" onclick="toggleTagFilter('${tag}')" onmouseenter="highlightTagRows('${tag}')" onmouseleave="clearTagHighlight()">
+                    ${tag}<span class="tag-count">${count}</span>
+                </span>`
+            ).join('');
+
+            // Store for filtering
+            state.activeTag = null;
+        }
+
+        // Toggle tag filter on click
+        function toggleTagFilter(tag) {
+            const badges = document.querySelectorAll('.tag-badge');
+            const rows = document.querySelectorAll('.summaries-table tbody tr[data-summary-id]');
+
+            if (state.activeTag === tag) {
+                // Deselect - show all rows
+                state.activeTag = null;
+                badges.forEach(b => b.classList.remove('active'));
+                rows.forEach(r => r.classList.remove('tag-dimmed', 'tag-highlight'));
+            } else {
+                // Select this tag - filter rows
+                state.activeTag = tag;
+                badges.forEach(b => b.classList.toggle('active', b.dataset.tag === tag));
+                rows.forEach(r => {
+                    const rowTags = (r.dataset.tags || '').split(',').filter(t => t);
+                    if (rowTags.includes(tag)) {
+                        r.classList.add('tag-highlight');
+                        r.classList.remove('tag-dimmed');
+                    } else {
+                        r.classList.add('tag-dimmed');
+                        r.classList.remove('tag-highlight');
+                    }
+                });
+            }
+        }
+
+        // Highlight rows on hover (only if no active filter)
+        function highlightTagRows(tag) {
+            if (state.activeTag) return; // Don't interfere with active filter
+            const rows = document.querySelectorAll('.summaries-table tbody tr[data-summary-id]');
+            rows.forEach(r => {
+                const rowTags = (r.dataset.tags || '').split(',').filter(t => t);
+                if (rowTags.includes(tag)) {
+                    r.classList.add('tag-highlight');
+                }
+            });
+        }
+
+        // Clear hover highlight
+        function clearTagHighlight() {
+            if (state.activeTag) return; // Don't interfere with active filter
+            const rows = document.querySelectorAll('.summaries-table tbody tr[data-summary-id]');
+            rows.forEach(r => r.classList.remove('tag-highlight'));
         }
 
         // View screenshots for an hour without summaries

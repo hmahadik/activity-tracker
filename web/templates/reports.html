@@ -488,6 +488,146 @@
             opacity: 0.5;
         }
 
+        /* History List */
+        /* Saved Reports */
+        .section-desc {
+            color: var(--muted);
+            font-size: 0.85rem;
+            margin-bottom: 1rem;
+        }
+
+        .saved-report-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .saved-report-item:hover {
+            border-color: var(--accent);
+            background: var(--surface);
+        }
+
+        .saved-report-info {
+            flex: 1;
+        }
+
+        .saved-report-date {
+            font-weight: 600;
+            color: var(--accent);
+            font-size: 0.95rem;
+        }
+
+        .saved-report-summary {
+            color: var(--muted);
+            font-size: 0.8rem;
+            margin-top: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 500px;
+        }
+
+        .saved-report-stats {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            color: var(--text);
+            font-size: 0.85rem;
+        }
+
+        .saved-report-stats span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* History */
+        .history-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            margin-bottom: 8px;
+        }
+
+        .history-item:hover {
+            border-color: var(--accent);
+        }
+
+        .history-info {
+            flex: 1;
+        }
+
+        .history-title {
+            font-weight: 500;
+            color: var(--text);
+            margin-bottom: 4px;
+        }
+
+        .history-meta {
+            font-size: 0.8rem;
+            color: var(--muted);
+        }
+
+        .history-meta span {
+            margin-right: 12px;
+        }
+
+        .history-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .history-actions button {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8rem;
+        }
+
+        .history-actions button:hover {
+            background: var(--border);
+        }
+
+        .history-actions button.download {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        .history-actions button.download:hover {
+            background: var(--accent-strong);
+        }
+
+        .format-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            background: var(--surface);
+            border: 1px solid var(--border);
+        }
+
+        .format-badge.json { color: #f0db4f; border-color: #f0db4f; }
+        .format-badge.html { color: #e34c26; border-color: #e34c26; }
+        .format-badge.markdown { color: #83cd29; border-color: #83cd29; }
+        .format-badge.pdf { color: #ff5252; border-color: #ff5252; }
+
         /* Responsive */
         @media (max-width: 640px) {
             .container {
@@ -561,6 +701,29 @@
             </div>
         </div>
 
+        <!-- Saved Reports (cached daily reports) -->
+        <div class="section" id="saved-reports-section">
+            <h2>Saved Reports</h2>
+            <p class="section-desc">Previously generated daily reports. Click to view and export.</p>
+            <div id="saved-reports-list">
+                <div class="empty-state" id="saved-empty">
+                    <div class="empty-state-icon">📊</div>
+                    <p>No saved reports yet. Generate a report to save it.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Report History (exported files) -->
+        <div class="section" id="history-section">
+            <h2>Recent Exports</h2>
+            <div id="history-list">
+                <div class="empty-state" id="history-empty">
+                    <div class="empty-state-icon">📁</div>
+                    <p>No exported reports yet</p>
+                </div>
+            </div>
+        </div>
+
         <!-- Report Display -->
         <div class="report-container" id="report-container" style="display: none;">
             <div class="report-header">
@@ -607,6 +770,7 @@
         let currentReport = null;
         let currentTimeRange = '';
         let currentReportType = 'summary';
+        let pdfAvailable = true;  // Will be updated on load
 
         // Generate report
         async function generateReport(timeRange, reportType, includeScreenshots = true) {
@@ -729,20 +893,30 @@
             document.getElementById('report-container').style.display = 'block';
         }
 
-        // Export report
+        // Export report (uses already-generated data - instant!)
         async function exportReport(format) {
-            if (!currentTimeRange) {
+            if (!currentReport) {
                 showToast('Please generate a report first', 'warning');
                 return;
             }
+
+            if (format === 'pdf' && !pdfAvailable) {
+                showToast('PDF export unavailable. Install weasyprint for PDF support.', 'warning');
+                return;
+            }
+
+            // Show brief loading indicator for HTML/PDF (needs to embed images)
+            const btn = document.querySelector(`.export-btn[data-format="${format}"]`);
+            const originalText = btn.textContent;
+            btn.textContent = 'Exporting...';
+            btn.disabled = true;
 
             try {
                 const response = await fetch('/api/reports/export', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        time_range: currentTimeRange,
-                        report_type: currentReportType,
+                        report: currentReport,  // Pass the report data directly!
                         format: format
                     })
                 });
@@ -753,14 +927,187 @@
                 }
 
                 const result = await response.json();
+
+                // Refresh history list to show new export
+                loadHistory();
+
                 window.location.href = result.download_url;
             } catch (error) {
                 showToast('Export error: ' + error.message, 'error');
+            } finally {
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        // Check export capabilities on load
+        async function checkCapabilities() {
+            try {
+                const response = await fetch('/api/reports/capabilities');
+                const caps = await response.json();
+                pdfAvailable = caps.pdf_available;
+
+                // Update PDF button state
+                const pdfBtn = document.querySelector('.export-btn[data-format="pdf"]');
+                if (pdfBtn && !pdfAvailable) {
+                    pdfBtn.title = caps.pdf_message || 'PDF export unavailable';
+                    pdfBtn.style.opacity = '0.5';
+                    pdfBtn.style.cursor = 'not-allowed';
+                }
+            } catch (error) {
+                console.warn('Failed to check export capabilities:', error);
+            }
+        }
+
+        // Load report history
+        // Load saved reports (cached daily reports)
+        async function loadSavedReports() {
+            try {
+                const response = await fetch('/api/reports/saved?days_back=30');
+                const data = await response.json();
+
+                const list = document.getElementById('saved-reports-list');
+                const emptyState = document.getElementById('saved-empty');
+
+                if (!data.reports || data.reports.length === 0) {
+                    emptyState.style.display = 'block';
+                    return;
+                }
+
+                emptyState.style.display = 'none';
+
+                // Format duration helper
+                const formatDuration = (mins) => {
+                    if (mins < 60) return `${mins}m`;
+                    return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+                };
+
+                // Format date for display
+                const formatDate = (dateStr) => {
+                    const date = new Date(dateStr + 'T12:00:00');
+                    return date.toLocaleDateString('en-US', {
+                        weekday: 'short',
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric'
+                    });
+                };
+
+                const itemsHtml = data.reports.map(r => `
+                    <div class="saved-report-item" onclick="loadSavedReport('${r.period_date}')">
+                        <div class="saved-report-info">
+                            <div class="saved-report-date">${formatDate(r.period_date)}</div>
+                            <div class="saved-report-summary">${r.executive_summary.replace(/</g, '&lt;')}</div>
+                        </div>
+                        <div class="saved-report-stats">
+                            <span>⏱️ ${formatDuration(r.total_minutes)}</span>
+                        </div>
+                    </div>
+                `).join('');
+
+                list.innerHTML = itemsHtml;
+            } catch (error) {
+                console.warn('Failed to load saved reports:', error);
+            }
+        }
+
+        // Load a specific saved report for viewing/export
+        async function loadSavedReport(periodDate) {
+            document.getElementById('loading').style.display = 'flex';
+            document.getElementById('report-container').style.display = 'none';
+
+            try {
+                const response = await fetch(`/api/reports/saved/${periodDate}`);
+                if (!response.ok) {
+                    throw new Error('Failed to load saved report');
+                }
+
+                const report = await response.json();
+                currentReport = report;
+                currentTimeRange = periodDate;
+                currentReportType = 'summary';
+                displayReport(report);
+            } catch (error) {
+                showToast('Error loading report: ' + error.message, 'error');
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        async function loadHistory() {
+            try {
+                const response = await fetch('/api/reports/history?limit=10');
+                const data = await response.json();
+
+                const historyList = document.getElementById('history-list');
+                const emptyState = document.getElementById('history-empty');
+
+                if (!data.reports || data.reports.length === 0) {
+                    emptyState.style.display = 'block';
+                    return;
+                }
+
+                emptyState.style.display = 'none';
+
+                // Build history items HTML
+                const itemsHtml = data.reports.map(r => {
+                    const createdAt = new Date(r.created_at).toLocaleString();
+                    const sizeDisplay = r.file_size_display || '';
+
+                    return `
+                        <div class="history-item" data-id="${r.id}">
+                            <div class="history-info">
+                                <div class="history-title">
+                                    <span class="format-badge ${r.format}">${r.format}</span>
+                                    ${r.title}
+                                </div>
+                                <div class="history-meta">
+                                    <span>${createdAt}</span>
+                                    ${sizeDisplay ? `<span>${sizeDisplay}</span>` : ''}
+                                </div>
+                            </div>
+                            <div class="history-actions">
+                                <button class="download" onclick="window.location.href='${r.download_url}'">Download</button>
+                                <button onclick="deleteHistoryItem(${r.id})">Delete</button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                historyList.innerHTML = itemsHtml;
+            } catch (error) {
+                console.warn('Failed to load report history:', error);
+            }
+        }
+
+        // Delete history item
+        async function deleteHistoryItem(id) {
+            if (!confirm('Remove this report from history?')) return;
+
+            try {
+                const response = await fetch(`/api/reports/history/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    loadHistory();  // Refresh the list
+                } else {
+                    showToast('Failed to delete report', 'error');
+                }
+            } catch (error) {
+                showToast('Error deleting report: ' + error.message, 'error');
             }
         }
 
         // Event listeners
         document.addEventListener('DOMContentLoaded', () => {
+            // Check export capabilities (PDF availability)
+            checkCapabilities();
+
+            // Load saved reports and export history
+            loadSavedReports();
+            loadHistory();
+
             // Preset buttons
             document.querySelectorAll('.preset-btn').forEach(btn => {
                 btn.addEventListener('click', () => {

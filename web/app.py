@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import json
 import os
 import sqlite3
 import subprocess
@@ -2106,22 +2107,24 @@ _report_exporter = None
 
 
 def get_report_generator():
-    """Get or create the report generator instance."""
-    global _report_generator
-    if _report_generator is None:
-        from tracker.reports import ReportGenerator
-        storage = ActivityStorage()
-        try:
-            # Use configured model and host from settings
-            cfg = config_manager.config.summarization
-            summarizer = HybridSummarizer(
-                model=cfg.model,
-                ollama_host=cfg.ollama_host,
-            )
-        except Exception:
-            summarizer = None
-        _report_generator = ReportGenerator(storage, summarizer, config_manager)
-    return _report_generator
+    """Get a report generator with current settings.
+
+    Note: This creates a fresh instance each time to ensure it uses
+    the latest configuration (model, host, etc.) from settings.
+    Reports aren't generated frequently enough for caching to matter.
+    """
+    from tracker.reports import ReportGenerator
+    storage = ActivityStorage()
+    try:
+        # Use configured model and host from settings (fresh each time)
+        cfg = config_manager.config.summarization
+        summarizer = HybridSummarizer(
+            model=cfg.model,
+            ollama_host=cfg.ollama_host,
+        )
+    except Exception:
+        summarizer = None
+    return ReportGenerator(storage, summarizer, config_manager)
 
 
 def get_report_exporter():
@@ -2172,12 +2175,23 @@ def api_generate_report():
 
     try:
         generator = get_report_generator()
-        report = generator.generate(
+
+        # Try to use cached daily reports first (much faster)
+        report = generator.generate_from_cached(
             time_range=time_range,
             report_type=report_type,
             include_screenshots=include_screenshots,
             max_screenshots=max_screenshots
         )
+
+        # Fall back to full generation if cache unavailable
+        if report is None:
+            report = generator.generate(
+                time_range=time_range,
+                report_type=report_type,
+                include_screenshots=include_screenshots,
+                max_screenshots=max_screenshots
+            )
 
         # Convert to JSON-serializable format
         key_screenshots = []
@@ -2227,13 +2241,22 @@ def api_generate_report():
 
 @app.route('/api/reports/export', methods=['POST'])
 def api_export_report():
-    """Generate and export report to file.
+    """Export report to file.
 
-    Request body:
+    If 'report' data is provided, exports directly (instant - no regeneration).
+    If only time_range is provided, falls back to regenerating (slow - legacy behavior).
+
+    Request body (preferred - instant export):
+        {
+            "report": { ... report data from generate endpoint ... },
+            "format": "pdf"  // markdown, html, pdf, json
+        }
+
+    Request body (legacy - regenerates report):
         {
             "time_range": "last week",
             "report_type": "summary",
-            "format": "pdf"  // markdown, html, pdf, json
+            "format": "pdf"
         }
 
     Returns:
@@ -2244,26 +2267,31 @@ def api_export_report():
         }
     """
     data = request.json or {}
-
-    time_range = data.get('time_range')
-    if not time_range:
-        return jsonify({"error": "time_range is required"}), 400
-
-    report_type = data.get('report_type', 'summary')
     export_format = data.get('format', 'markdown')
 
     if export_format not in ('markdown', 'html', 'pdf', 'json'):
         return jsonify({"error": "format must be markdown, html, pdf, or json"}), 400
 
     try:
-        generator = get_report_generator()
-        report = generator.generate(
-            time_range=time_range,
-            report_type=report_type
-        )
-
         exporter = get_report_exporter()
-        path = exporter.export(report, format=export_format)
+
+        # Preferred: use provided report data (instant export)
+        report_data = data.get('report')
+        if report_data:
+            path = exporter.export_from_dict(report_data, format=export_format)
+        else:
+            # Legacy fallback: regenerate report (slow)
+            time_range = data.get('time_range')
+            if not time_range:
+                return jsonify({"error": "Either 'report' data or 'time_range' is required"}), 400
+
+            report_type = data.get('report_type', 'summary')
+            generator = get_report_generator()
+            report = generator.generate(
+                time_range=time_range,
+                report_type=report_type
+            )
+            path = exporter.export(report, format=export_format)
 
         return jsonify({
             'path': str(path),
@@ -2276,6 +2304,186 @@ def api_export_report():
         import traceback
         traceback.print_exc()
         return jsonify({'error': f'Export failed: {str(e)}'}), 500
+
+
+@app.route('/api/reports/capabilities', methods=['GET'])
+def api_report_capabilities():
+    """Get report export capabilities.
+
+    Returns:
+        {
+            "formats": ["markdown", "html", "json", "pdf"],
+            "pdf_available": true/false,
+            "pdf_message": "Install weasyprint for PDF support" (if unavailable)
+        }
+    """
+    from tracker.report_export import is_pdf_available
+
+    pdf_available = is_pdf_available()
+    formats = ['markdown', 'html', 'json']
+    if pdf_available:
+        formats.append('pdf')
+
+    return jsonify({
+        'formats': formats,
+        'pdf_available': pdf_available,
+        'pdf_message': None if pdf_available else 'PDF export requires weasyprint. Install with: pip install weasyprint'
+    })
+
+
+@app.route('/api/reports/history', methods=['GET'])
+def api_report_history():
+    """Get exported reports history.
+
+    Query params:
+        limit: Max number of records (default 50)
+        offset: Number of records to skip (default 0)
+
+    Returns:
+        {
+            "reports": [
+                {
+                    "id": 1,
+                    "title": "Activity Report: Today",
+                    "time_range": "today",
+                    "report_type": "summary",
+                    "format": "json",
+                    "filename": "Activity_Report_...",
+                    "download_url": "/reports/download/...",
+                    "file_size": 12345,
+                    "created_at": "2025-12-30T12:00:00"
+                },
+                ...
+            ]
+        }
+    """
+    limit = request.args.get('limit', 50, type=int)
+    offset = request.args.get('offset', 0, type=int)
+
+    storage = ActivityStorage()
+    reports = storage.get_exported_reports(limit=limit, offset=offset)
+
+    # Add download URLs and format file sizes
+    for r in reports:
+        r['download_url'] = f"/reports/download/{r['filename']}"
+        if r.get('file_size'):
+            # Format as KB/MB
+            size = r['file_size']
+            if size > 1024 * 1024:
+                r['file_size_display'] = f"{size / (1024 * 1024):.1f} MB"
+            elif size > 1024:
+                r['file_size_display'] = f"{size / 1024:.1f} KB"
+            else:
+                r['file_size_display'] = f"{size} B"
+
+    return jsonify({'reports': reports})
+
+
+@app.route('/api/reports/history/<int:report_id>', methods=['DELETE'])
+def api_delete_report_history(report_id):
+    """Delete an exported report from history.
+
+    Note: This only removes the database record. The file remains on disk.
+
+    Returns:
+        {"success": true} or {"error": "..."}
+    """
+    storage = ActivityStorage()
+    if storage.delete_exported_report(report_id):
+        return jsonify({'success': True})
+    else:
+        return jsonify({'error': 'Report not found'}), 404
+
+
+@app.route('/api/reports/saved', methods=['GET'])
+def api_saved_reports():
+    """Get list of saved/cached reports.
+
+    Returns cached daily reports that can be re-exported in any format.
+
+    Query params:
+        days_back: How many days to look back (default 30)
+
+    Returns:
+        {
+            "reports": [
+                {
+                    "id": 1,
+                    "period_type": "daily",
+                    "period_date": "2025-12-30",
+                    "executive_summary": "...",
+                    "total_minutes": 240,
+                    "created_at": "2025-12-31T00:05:00"
+                },
+                ...
+            ]
+        }
+    """
+    days_back = request.args.get('days_back', 30, type=int)
+
+    storage = ActivityStorage()
+
+    # Get cached reports for the period
+    end = datetime.now()
+    start = end - timedelta(days=days_back)
+    cached = storage.get_cached_reports_in_range('daily', start, end)
+
+    reports = []
+    for r in cached:
+        # Parse analytics to get total minutes
+        analytics = r.get('analytics_json', '{}')
+        if isinstance(analytics, str):
+            analytics = json.loads(analytics)
+
+        reports.append({
+            'id': r.get('id'),
+            'period_type': r.get('period_type', 'daily'),
+            'period_date': r.get('period_date'),
+            'executive_summary': (r.get('executive_summary', '') or '')[:200] + '...',
+            'total_minutes': analytics.get('total_active_minutes', 0),
+            'created_at': r.get('created_at'),
+        })
+
+    # Sort by date descending
+    reports.sort(key=lambda x: x['period_date'], reverse=True)
+
+    return jsonify({'reports': reports})
+
+
+@app.route('/api/reports/saved/<period_date>', methods=['GET'])
+def api_get_saved_report(period_date):
+    """Get a specific saved daily report.
+
+    Returns the full report data that can be used for export.
+
+    Returns:
+        Full report data in the same format as /api/reports/generate
+    """
+    storage = ActivityStorage()
+    cached = storage.get_cached_report('daily', period_date)
+
+    if not cached:
+        return jsonify({'error': 'Report not found'}), 404
+
+    # Parse JSON fields
+    analytics = cached.get('analytics_json', '{}')
+    if isinstance(analytics, str):
+        analytics = json.loads(analytics)
+
+    sections = cached.get('sections_json', '[]')
+    if isinstance(sections, str):
+        sections = json.loads(sections)
+
+    # Build response in same format as generate endpoint
+    return jsonify({
+        'title': f"Activity Report: {period_date}",
+        'time_range': period_date,
+        'generated_at': cached.get('created_at', ''),
+        'executive_summary': cached.get('executive_summary', ''),
+        'sections': sections,
+        'analytics': analytics,
+        'key_screenshots': [],  # Can be added later if needed
+    })
 
 
 @app.route('/reports/download/<filename>')
@@ -2319,6 +2527,198 @@ def api_report_presets():
             {'name': 'Standup (Yesterday)', 'time_range': 'yesterday', 'type': 'standup'},
         ]
     })
+
+
+# ==================== Tag Management API ====================
+
+@app.route('/api/tags', methods=['GET'])
+def api_get_all_tags():
+    """Get all unique tags with their occurrence counts.
+
+    Returns:
+        {
+            "tags": [
+                {"tag": "debugging", "count": 12},
+                {"tag": "development", "count": 9},
+                ...
+            ],
+            "total_unique": 182
+        }
+    """
+    try:
+        storage = ActivityStorage()
+        tag_counts = storage.get_all_tags()
+
+        # Sort by count descending, then alphabetically
+        sorted_tags = sorted(tag_counts.items(), key=lambda x: (-x[1], x[0]))
+        tags_list = [{"tag": tag, "count": count} for tag, count in sorted_tags]
+
+        return jsonify({
+            "tags": tags_list,
+            "total_unique": len(tags_list)
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/tags/suggest-consolidation', methods=['POST'])
+def api_suggest_tag_consolidation():
+    """Use LLM to suggest tag consolidation groups.
+
+    Request body (optional):
+        {"min_count": 1}  - Minimum occurrence to include tag
+
+    Returns:
+        {
+            "consolidations": [
+                {
+                    "canonical": "debugging",
+                    "variants": ["debugging", "Debugging", "debug"],
+                    "total_count": 17
+                },
+                ...
+            ]
+        }
+    """
+    import requests as http_requests
+
+    data = request.json or {}
+    min_count = data.get('min_count', 1)
+
+    try:
+        storage = ActivityStorage()
+        tag_counts = storage.get_all_tags()
+
+        # Filter by min_count
+        filtered_tags = {k: v for k, v in tag_counts.items() if v >= min_count}
+
+        if len(filtered_tags) < 2:
+            return jsonify({
+                "consolidations": [],
+                "message": "Not enough tags to analyze"
+            })
+
+        # Build the prompt
+        tags_list = [f"{tag} ({count}x)" for tag, count in sorted(filtered_tags.items(), key=lambda x: (-x[1], x[0]))]
+
+        prompt = '''You are a tag consolidation assistant. Given a list of tags with their occurrence counts, identify groups of tags that represent the same concept but have different naming variations (case differences, hyphens vs spaces, singular vs plural, abbreviations, etc.).
+
+For each group, suggest:
+1. The canonical tag name (use lowercase-hyphenated format, e.g., "code-review" not "Code Review")
+2. All variants that should map to it
+
+Only include groups where consolidation makes sense. Skip unique tags that don't have similar variants.
+
+Tags:
+''' + '\n'.join(tags_list) + '''
+
+Respond in JSON format ONLY (no markdown code blocks):
+{
+  "consolidations": [
+    {
+      "canonical": "the-canonical-tag",
+      "variants": ["variant1", "variant2"],
+      "total_count": 123
+    }
+  ]
+}
+'''
+
+        # Query Ollama
+        cfg = config_manager.config.summarization
+        response = http_requests.post(
+            f"{cfg.ollama_host}/api/generate",
+            json={
+                'model': cfg.model,
+                'prompt': prompt,
+                'stream': False,
+                'options': {'temperature': 0.1}
+            },
+            timeout=120
+        )
+        response.raise_for_status()
+
+        result_text = response.json().get('response', '')
+
+        # Parse JSON from response (handle markdown code blocks)
+        result_text = result_text.strip()
+        if result_text.startswith('```'):
+            # Remove markdown code blocks
+            lines = result_text.split('\n')
+            result_text = '\n'.join(lines[1:-1] if lines[-1] == '```' else lines[1:])
+
+        result = json.loads(result_text)
+
+        # Calculate actual total counts for each group
+        for group in result.get('consolidations', []):
+            variants = group.get('variants', [])
+            actual_count = sum(tag_counts.get(v, 0) for v in variants)
+            group['total_count'] = actual_count
+
+        return jsonify(result)
+
+    except json.JSONDecodeError as e:
+        return jsonify({"error": f"Failed to parse LLM response: {e}", "raw": result_text[:500]}), 500
+    except http_requests.exceptions.RequestException as e:
+        return jsonify({"error": f"Ollama request failed: {e}"}), 503
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/tags/consolidate', methods=['POST'])
+def api_consolidate_tags():
+    """Apply tag consolidation by updating tags in database.
+
+    Request body:
+        {
+            "consolidations": [
+                {
+                    "canonical": "debugging",
+                    "variants": ["Debugging", "debug", "Debug"]
+                },
+                ...
+            ]
+        }
+
+    Returns:
+        {"status": "success", "updated_summaries": 15, "tags_consolidated": 3}
+    """
+    data = request.json or {}
+    consolidations = data.get('consolidations', [])
+
+    if not consolidations:
+        return jsonify({"error": "No consolidations provided"}), 400
+
+    try:
+        storage = ActivityStorage()
+        total_updated = 0
+        tags_consolidated = 0
+
+        for group in consolidations:
+            canonical = group.get('canonical')
+            variants = group.get('variants', [])
+
+            if not canonical or not variants:
+                continue
+
+            # Remove canonical from variants if present (don't replace itself)
+            variants_to_replace = [v for v in variants if v != canonical]
+
+            if not variants_to_replace:
+                continue
+
+            updated = storage.consolidate_tags(canonical, variants_to_replace)
+            total_updated += updated
+            if updated > 0:
+                tags_consolidated += 1
+
+        return jsonify({
+            "status": "success",
+            "updated_summaries": total_updated,
+            "tags_consolidated": tags_consolidated
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == '__main__':

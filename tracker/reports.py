@@ -151,6 +151,10 @@ class ReportGenerator:
         """
         # Parse time range
         start, end = self.time_parser.parse(time_range)
+
+        # Validate time range
+        self._validate_time_range(start, end)
+
         range_description = self.time_parser.describe_range(start, end)
 
         logger.info(f"Generating {report_type} report for {range_description}")
@@ -160,8 +164,19 @@ class ReportGenerator:
         screenshots = self.storage.get_screenshots_in_range(start, end)
         sessions = self.storage.get_sessions_in_range(start, end)
 
-        # Get focus events for app/window usage analytics (exclude AFK periods)
+        # Get focus events for app/window usage analytics
+        # First try with require_session=True to exclude AFK periods
         focus_events = self.storage.get_focus_events_in_range(start, end, require_session=True)
+
+        # If no focus events found, try without session filter for older data
+        # (pre-Phase 15 data doesn't have session_id assigned)
+        if not focus_events and screenshots:
+            focus_events = self.storage.get_focus_events_in_range(start, end, require_session=False)
+            if focus_events:
+                logger.info(
+                    f"Using {len(focus_events)} focus events without session filter "
+                    "(older data before session tracking was added)"
+                )
 
         logger.debug(
             f"Found {len(summaries)} summaries, "
@@ -192,6 +207,44 @@ class ReportGenerator:
         report.analytics = analytics
 
         return report
+
+    def _validate_time_range(self, start: datetime, end: datetime) -> None:
+        """Validate time range for report generation.
+
+        Args:
+            start: Start datetime.
+            end: End datetime.
+
+        Raises:
+            ValueError: If the time range is invalid.
+        """
+        now = datetime.now()
+
+        # Check if end is before start
+        if end < start:
+            raise ValueError(
+                f"Invalid time range: end ({end.strftime('%Y-%m-%d %H:%M')}) "
+                f"is before start ({start.strftime('%Y-%m-%d %H:%M')})"
+            )
+
+        # Check if range is too large (> 365 days)
+        max_days = 365
+        range_days = (end - start).days
+        if range_days > max_days:
+            raise ValueError(
+                f"Time range too large: {range_days} days. "
+                f"Maximum allowed is {max_days} days."
+            )
+
+        # Check if entire range is in the future
+        if start > now:
+            raise ValueError(
+                f"Time range is entirely in the future. "
+                f"No data available for {start.strftime('%Y-%m-%d')} onwards."
+            )
+
+        # Warn but don't error if end extends into future (just clip to now)
+        # The storage queries will naturally return no data for future timestamps
 
     def _compute_analytics(
         self,
@@ -428,6 +481,10 @@ Be specific and use actual project names and technical terms from the summaries.
 
             executive_summary = self.summarizer.generate_text(prompt)
         else:
+            logger.warning(
+                "LLM not available for executive summary, using fallback. "
+                "Check Ollama service or model configuration."
+            )
             executive_summary = self._fallback_executive_summary(summary_texts, analytics)
 
         sections = self._group_into_sections(summaries)
@@ -568,6 +625,11 @@ Be specific and use actual project names and technical terms from the summaries.
                 "\n".join(f"- {s}" for s in all_texts[:20])
             )
         else:
+            if all_texts and (not self.summarizer or not self.summarizer.is_available()):
+                logger.warning(
+                    "LLM not available for detailed report summary, using fallback. "
+                    "Check Ollama service or model configuration."
+                )
             executive_summary = self._fallback_executive_summary(all_texts, analytics)
 
         return Report(
@@ -719,5 +781,539 @@ Brief description."""
         for text in summary_texts[:5]:
             snippet = text[:150] + '...' if len(text) > 150 else text
             lines.append(f"- {snippet}")
+
+        return "\n".join(lines)
+
+    def generate_daily_report(self, date_str: str) -> Optional[dict]:
+        """Generate and cache a daily report for a specific date.
+
+        This generates a summary report for a single day and caches it
+        for fast synthesis into larger reports (weekly, monthly, custom).
+
+        Args:
+            date_str: Date in YYYY-MM-DD format.
+
+        Returns:
+            Cached report dict if generated successfully, None if no activity.
+        """
+        import time
+
+        # Parse date and create time range
+        try:
+            date = datetime.strptime(date_str, '%Y-%m-%d')
+        except ValueError:
+            logger.error(f"Invalid date format: {date_str}")
+            return None
+
+        start = datetime.combine(date.date(), datetime.min.time())
+        end = datetime.combine(date.date(), datetime.max.time())
+
+        # Check if already cached
+        existing = self.storage.get_cached_report('daily', date_str)
+        if existing:
+            logger.debug(f"Daily report for {date_str} already cached")
+            return existing
+
+        # Get summaries for this day
+        summaries = self.storage.get_summaries_in_range(start, end)
+        if not summaries:
+            logger.debug(f"No summaries for {date_str}, skipping")
+            return None
+
+        logger.info(f"Generating daily report for {date_str} ({len(summaries)} summaries)")
+
+        start_time = time.time()
+
+        # Get other data for analytics
+        screenshots = self.storage.get_screenshots_in_range(start, end)
+        sessions = self.storage.get_sessions_in_range(start, end)
+
+        # Get focus events, with fallback for older data without session_id
+        focus_events = self.storage.get_focus_events_in_range(start, end, require_session=True)
+        if not focus_events and screenshots:
+            focus_events = self.storage.get_focus_events_in_range(start, end, require_session=False)
+
+        # Compute analytics
+        analytics = self._compute_analytics(screenshots, sessions, start, end)
+
+        # Generate executive summary
+        summary_texts = [s['summary'] for s in summaries if s.get('summary')]
+        app_usage_context = self._build_focus_context(focus_events) if focus_events else ""
+
+        if self.summarizer and self.summarizer.is_available() and summary_texts:
+            prompt = f"""Summarize the day's activities in 2-3 paragraphs.
+Date: {date.strftime('%A, %B %d, %Y')}
+Total active time: {analytics.total_active_minutes} minutes
+Top applications: {', '.join(a['name'] for a in analytics.top_apps[:5])}
+{app_usage_context}
+
+Activity summaries from throughout the day:
+{chr(10).join(f"- {s}" for s in summary_texts[:15])}
+
+Focus on:
+1. Main accomplishments and tasks completed
+2. Key projects or areas of focus
+3. Any notable patterns
+
+Be specific - use actual project names and technical terms from the summaries.
+Do NOT assume different apps/windows are related unless clearly the same project."""
+
+            executive_summary = self.summarizer.generate_text(prompt)
+            model_used = self.config.config.summarization.model
+        else:
+            if summary_texts and (not self.summarizer or not self.summarizer.is_available()):
+                logger.warning(
+                    "LLM not available for daily report summary, using fallback. "
+                    "Check Ollama service or model configuration."
+                )
+            executive_summary = self._fallback_executive_summary(summary_texts, analytics)
+            model_used = None
+
+        inference_time_ms = int((time.time() - start_time) * 1000)
+
+        # Convert analytics to dict for storage
+        analytics_dict = {
+            'total_active_minutes': analytics.total_active_minutes,
+            'total_sessions': analytics.total_sessions,
+            'top_apps': analytics.top_apps,
+            'top_windows': analytics.top_windows,
+            'activity_by_hour': analytics.activity_by_hour,
+            'activity_by_day': analytics.activity_by_day,
+            'busiest_period': analytics.busiest_period,
+        }
+
+        # Save to cache
+        summary_ids = [s['id'] for s in summaries]
+        self.storage.save_cached_report(
+            period_type='daily',
+            period_date=date_str,
+            start_time=start,
+            end_time=end,
+            executive_summary=executive_summary,
+            sections=[],  # Daily reports are just summaries, no sections
+            analytics=analytics_dict,
+            summary_ids=summary_ids,
+            model_used=model_used,
+            inference_time_ms=inference_time_ms,
+        )
+
+        logger.info(f"Cached daily report for {date_str} ({inference_time_ms}ms)")
+
+        return self.storage.get_cached_report('daily', date_str)
+
+    def generate_missing_daily_reports(self, days_back: int = 7) -> int:
+        """Generate cached daily reports for recent days that are missing.
+
+        Args:
+            days_back: How many days to look back.
+
+        Returns:
+            Number of reports generated.
+        """
+        missing_dates = self.storage.get_missing_daily_reports(days_back)
+        if not missing_dates:
+            logger.debug("No missing daily reports")
+            return 0
+
+        logger.info(f"Generating {len(missing_dates)} missing daily reports")
+        count = 0
+        for date_str in missing_dates:
+            result = self.generate_daily_report(date_str)
+            if result:
+                count += 1
+
+        return count
+
+    def generate_from_cached(
+        self,
+        time_range: str,
+        report_type: str = "summary",
+        include_screenshots: bool = True,
+        max_screenshots: int = 10
+    ) -> Optional[Report]:
+        """Generate a report by synthesizing cached daily reports.
+
+        This is much faster than generate() as it uses pre-computed daily
+        summaries instead of re-processing all individual summaries.
+
+        Falls back to None if cached daily reports are not available for
+        the requested range. Caller should then use generate() instead.
+
+        Args:
+            time_range: Natural language time range (e.g., "last week").
+            report_type: Type of report - "summary", "detailed", or "standup".
+            include_screenshots: Whether to include key screenshots.
+            max_screenshots: Maximum number of screenshots to include.
+
+        Returns:
+            Report object if cached data available, None otherwise.
+        """
+        # Parse time range
+        start, end = self.time_parser.parse(time_range)
+
+        # Validate time range
+        self._validate_time_range(start, end)
+
+        range_description = self.time_parser.describe_range(start, end)
+
+        # Get all days in range
+        days_in_range = []
+        current = start.date()
+        end_date = end.date()
+        while current <= end_date:
+            days_in_range.append(current.strftime('%Y-%m-%d'))
+            current += timedelta(days=1)
+
+        if not days_in_range:
+            return None
+
+        # Get cached daily reports for these days
+        cached_reports = self.storage.get_cached_reports_in_range('daily', start, end)
+        if not cached_reports:
+            logger.debug(f"No cached daily reports for {range_description}")
+            return None
+
+        # Check coverage - we need reports for most days
+        cached_dates = {r['period_date'] for r in cached_reports}
+        coverage = len(cached_dates) / len(days_in_range)
+
+        if coverage < 0.7:  # Require at least 70% coverage
+            logger.debug(
+                f"Insufficient cache coverage ({coverage:.0%}) for {range_description}, "
+                f"have {len(cached_dates)}/{len(days_in_range)} days"
+            )
+            return None
+
+        logger.info(
+            f"Synthesizing {report_type} report from {len(cached_reports)} cached daily reports "
+            f"({coverage:.0%} coverage)"
+        )
+
+        # Aggregate analytics from cached reports
+        aggregated_analytics = self._aggregate_cached_analytics(cached_reports)
+
+        # Collect daily summaries
+        daily_summaries = []
+        for cr in sorted(cached_reports, key=lambda x: x['period_date']):
+            if cr.get('executive_summary'):
+                date = datetime.strptime(cr['period_date'], '%Y-%m-%d')
+                daily_summaries.append({
+                    'date': date,
+                    'date_str': date.strftime('%A, %B %d'),
+                    'summary': cr['executive_summary']
+                })
+
+        # Generate report based on type
+        if report_type == "standup":
+            report = self._synthesize_standup(daily_summaries, aggregated_analytics, range_description)
+        elif report_type == "detailed":
+            report = self._synthesize_detailed(daily_summaries, aggregated_analytics, range_description)
+        else:
+            report = self._synthesize_summary(daily_summaries, aggregated_analytics, range_description)
+
+        # Add screenshots if requested
+        if include_screenshots:
+            screenshots = self.storage.get_screenshots_in_range(start, end)
+            # Get all summaries referenced by cached reports
+            all_summary_ids = []
+            for cr in cached_reports:
+                ids = cr.get('summary_ids_json', '[]')
+                if isinstance(ids, str):
+                    ids = json.loads(ids)
+                all_summary_ids.extend(ids)
+
+            summaries = [
+                self.storage.get_threshold_summary(sid)
+                for sid in all_summary_ids[:50]  # Limit for performance
+            ]
+            summaries = [s for s in summaries if s]
+
+            report.key_screenshots = self._select_key_screenshots(
+                screenshots, summaries, max_screenshots
+            )
+
+        return report
+
+    def _aggregate_cached_analytics(self, cached_reports: List[dict]) -> ReportAnalytics:
+        """Aggregate analytics from multiple cached daily reports.
+
+        Args:
+            cached_reports: List of cached report dicts.
+
+        Returns:
+            Combined ReportAnalytics.
+        """
+        total_minutes = 0
+        total_sessions = 0
+        app_minutes = {}
+        window_minutes = {}
+        activity_by_hour = [0] * 24
+        activity_by_day = []
+
+        for cr in cached_reports:
+            analytics_json = cr.get('analytics_json', '{}')
+            if isinstance(analytics_json, str):
+                analytics = json.loads(analytics_json)
+            else:
+                analytics = analytics_json
+
+            total_minutes += analytics.get('total_active_minutes', 0)
+            total_sessions += analytics.get('total_sessions', 0)
+
+            # Aggregate app usage
+            for app in analytics.get('top_apps', []):
+                name = app.get('name', 'Unknown')
+                mins = app.get('minutes', 0)
+                app_minutes[name] = app_minutes.get(name, 0) + mins
+
+            # Aggregate window usage
+            for win in analytics.get('top_windows', []):
+                title = win.get('title', 'Unknown')
+                mins = win.get('minutes', 0)
+                window_minutes[title] = window_minutes.get(title, 0) + mins
+
+            # Aggregate hourly activity
+            for i, mins in enumerate(analytics.get('activity_by_hour', [])):
+                if i < 24:
+                    activity_by_hour[i] += mins
+
+            # Collect daily activity
+            for day in analytics.get('activity_by_day', []):
+                activity_by_day.append(day)
+
+        # Sort and limit top apps/windows
+        total_app_mins = sum(app_minutes.values()) or 1
+        top_apps = sorted([
+            {
+                'name': app,
+                'minutes': int(mins),
+                'percentage': round(mins / total_app_mins * 100, 1)
+            }
+            for app, mins in app_minutes.items()
+        ], key=lambda x: -x['minutes'])[:10]
+
+        top_windows = sorted([
+            {'title': title, 'minutes': int(mins)}
+            for title, mins in window_minutes.items()
+        ], key=lambda x: -x['minutes'])[:10]
+
+        # Find busiest period from aggregated data
+        busiest_period = "No activity"
+        if activity_by_day:
+            busiest_day = max(activity_by_day, key=lambda x: x.get('minutes', 0))
+            busiest_period = busiest_day.get('date', 'Unknown')
+
+        return ReportAnalytics(
+            total_active_minutes=total_minutes,
+            total_sessions=total_sessions,
+            top_apps=top_apps,
+            top_windows=top_windows,
+            activity_by_hour=[int(h) for h in activity_by_hour],
+            activity_by_day=sorted(activity_by_day, key=lambda x: x.get('date', '')),
+            busiest_period=busiest_period
+        )
+
+    def _synthesize_summary(
+        self,
+        daily_summaries: List[dict],
+        analytics: ReportAnalytics,
+        range_description: str
+    ) -> Report:
+        """Synthesize a summary report from cached daily summaries.
+
+        Args:
+            daily_summaries: List of daily summary dicts with date and summary.
+            analytics: Aggregated analytics.
+            range_description: Human-readable time range.
+
+        Returns:
+            Report with executive summary synthesized from daily reports.
+        """
+        if not daily_summaries:
+            return Report(
+                title=f"Activity Report: {range_description}",
+                time_range=range_description,
+                generated_at=datetime.now(),
+                executive_summary="No activity recorded during this period.",
+                sections=[],
+                analytics=analytics,
+                key_screenshots=[],
+                raw_summaries=[]
+            )
+
+        # Build prompt for synthesizing daily summaries
+        if self.summarizer and self.summarizer.is_available():
+            prompt = f"""Synthesize these daily activity summaries into a cohesive executive summary.
+Time period: {range_description}
+Total active time: {analytics.total_active_minutes} minutes across {len(daily_summaries)} days
+Top applications: {', '.join(a['name'] for a in analytics.top_apps[:5])}
+
+Daily summaries:
+{chr(10).join(f"**{d['date_str']}**: {d['summary'][:300]}..." if len(d['summary']) > 300 else f"**{d['date_str']}**: {d['summary']}" for d in daily_summaries)}
+
+Write a 2-3 paragraph executive summary covering:
+1. Main themes and accomplishments across the period
+2. Key projects worked on consistently
+3. Notable patterns or progression
+
+Be specific and use actual project names from the summaries.
+Do NOT assume different days' work is related unless clearly the same project."""
+
+            executive_summary = self.summarizer.generate_text(prompt)
+        else:
+            logger.warning(
+                "LLM not available for synthesized report summary, using fallback. "
+                "Check Ollama service or model configuration."
+            )
+            executive_summary = self._fallback_synthesized_summary(daily_summaries, analytics)
+
+        # Create sections from daily summaries
+        sections = [
+            ReportSection(
+                title=d['date_str'],
+                content=d['summary'][:500] + '...' if len(d['summary']) > 500 else d['summary']
+            )
+            for d in daily_summaries
+        ]
+
+        return Report(
+            title=f"Activity Report: {range_description}",
+            time_range=range_description,
+            generated_at=datetime.now(),
+            executive_summary=executive_summary,
+            sections=sections,
+            analytics=analytics,
+            key_screenshots=[],
+            raw_summaries=[]
+        )
+
+    def _synthesize_detailed(
+        self,
+        daily_summaries: List[dict],
+        analytics: ReportAnalytics,
+        range_description: str
+    ) -> Report:
+        """Synthesize a detailed report from cached daily summaries.
+
+        Args:
+            daily_summaries: List of daily summary dicts.
+            analytics: Aggregated analytics.
+            range_description: Human-readable time range.
+
+        Returns:
+            Report with detailed day-by-day breakdown.
+        """
+        # For detailed reports, include full daily summaries as sections
+        sections = [
+            ReportSection(
+                title=d['date_str'],
+                content=d['summary']
+            )
+            for d in daily_summaries
+        ]
+
+        # Brief executive overview
+        if self.summarizer and self.summarizer.is_available() and daily_summaries:
+            prompt = f"""Write a brief overview paragraph for a detailed activity report.
+Time period: {range_description}
+Number of days: {len(daily_summaries)}
+Total active time: {analytics.total_active_minutes} minutes
+
+Keep it to 2-3 sentences summarizing the overall focus and accomplishments."""
+
+            executive_summary = self.summarizer.generate_text(prompt)
+        else:
+            executive_summary = f"Detailed activity report covering {len(daily_summaries)} days with {analytics.total_active_minutes} minutes of activity."
+
+        return Report(
+            title=f"Detailed Report: {range_description}",
+            time_range=range_description,
+            generated_at=datetime.now(),
+            executive_summary=executive_summary,
+            sections=sections,
+            analytics=analytics,
+            key_screenshots=[],
+            raw_summaries=[]
+        )
+
+    def _synthesize_standup(
+        self,
+        daily_summaries: List[dict],
+        analytics: ReportAnalytics,
+        range_description: str
+    ) -> Report:
+        """Synthesize a standup report from cached daily summaries.
+
+        Args:
+            daily_summaries: List of daily summary dicts.
+            analytics: Aggregated analytics.
+            range_description: Human-readable time range.
+
+        Returns:
+            Report in standup format.
+        """
+        if not daily_summaries:
+            content = "No activity to report."
+        elif self.summarizer and self.summarizer.is_available():
+            # Use most recent day's summary for standup
+            recent_summaries = daily_summaries[-3:]  # Last 3 days
+            prompt = f"""Convert these recent activity summaries into a standup update.
+Format:
+- What I worked on: (2-3 bullet points)
+- Key accomplishments: (1-2 items)
+- Currently focused on: (1 item)
+
+Recent activities:
+{chr(10).join(f"**{d['date_str']}**: {d['summary'][:200]}" for d in recent_summaries)}
+
+Keep it concise and actionable."""
+
+            content = self.summarizer.generate_text(prompt)
+        else:
+            content = "What I worked on:\n"
+            for d in daily_summaries[-3:]:
+                content += f"- {d['date_str']}: {d['summary'][:100]}...\n"
+
+        return Report(
+            title=f"Standup: {range_description}",
+            time_range=range_description,
+            generated_at=datetime.now(),
+            executive_summary=content,
+            sections=[],
+            analytics=analytics,
+            key_screenshots=[],
+            raw_summaries=[]
+        )
+
+    def _fallback_synthesized_summary(
+        self,
+        daily_summaries: List[dict],
+        analytics: ReportAnalytics
+    ) -> str:
+        """Generate fallback summary without LLM.
+
+        Args:
+            daily_summaries: List of daily summary dicts.
+            analytics: Aggregated analytics.
+
+        Returns:
+            Simple formatted summary.
+        """
+        if not daily_summaries:
+            return "No activity recorded during this period."
+
+        lines = [
+            f"Activity report covering {len(daily_summaries)} days with "
+            f"{analytics.total_active_minutes} minutes of activity across "
+            f"{analytics.total_sessions} sessions.",
+            "",
+            f"Top applications: {', '.join(a['name'] for a in analytics.top_apps[:3])}.",
+            "",
+            "Daily highlights:",
+        ]
+
+        for d in daily_summaries[:5]:
+            snippet = d['summary'][:150] + '...' if len(d['summary']) > 150 else d['summary']
+            lines.append(f"- {d['date_str']}: {snippet}")
 
         return "\n".join(lines)

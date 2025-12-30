@@ -387,6 +387,52 @@ class ActivityStorage:
             except Exception:
                 pass  # Column already exists
 
+            # Exported reports history
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS exported_reports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    time_range TEXT NOT NULL,
+                    report_type TEXT NOT NULL,
+                    format TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    filepath TEXT NOT NULL,
+                    file_size INTEGER,
+                    start_time TIMESTAMP,
+                    end_time TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_exported_reports_created
+                ON exported_reports(created_at DESC)
+            """)
+
+            # Cached daily/weekly/monthly reports for fast synthesis
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS cached_reports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    period_type TEXT NOT NULL,  -- 'daily', 'weekly', 'monthly'
+                    period_date TEXT NOT NULL,  -- '2025-12-30' for daily, '2025-W52' for weekly, '2025-12' for monthly
+                    start_time TIMESTAMP NOT NULL,
+                    end_time TIMESTAMP NOT NULL,
+                    executive_summary TEXT,
+                    sections_json TEXT,  -- JSON array of sections
+                    analytics_json TEXT,  -- JSON of analytics data
+                    summary_ids_json TEXT,  -- JSON array of source summary IDs
+                    model_used TEXT,
+                    inference_time_ms INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(period_type, period_date)
+                )
+            """)
+
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_cached_reports_period
+                ON cached_reports(period_type, period_date)
+            """)
+
             conn.commit()
     
     def save_screenshot(self, filepath: str, dhash: str, window_title: str = None,
@@ -1077,6 +1123,11 @@ class ActivityStorage:
                 "DELETE FROM session_screenshots WHERE session_id = ?",
                 (session_id,),
             )
+            # Clear session_id from focus events (keep the events, just remove the link)
+            conn.execute(
+                "UPDATE window_focus_events SET session_id = NULL WHERE session_id = ?",
+                (session_id,),
+            )
             # Delete the session itself
             conn.execute(
                 "DELETE FROM activity_sessions WHERE id = ?",
@@ -1459,6 +1510,29 @@ class ActivityStorage:
             conn.commit()
             return summary_id
 
+    def has_summary_for_time_range(self, start_time: str, end_time: str) -> bool:
+        """Check if a summary already exists for the given time range.
+
+        Used to prevent duplicate summaries for the same time slot.
+
+        Args:
+            start_time: ISO format start timestamp
+            end_time: ISO format end timestamp
+
+        Returns:
+            True if a summary already exists, False otherwise.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT COUNT(*) FROM threshold_summaries
+                WHERE start_time = ? AND end_time = ?
+                """,
+                (start_time, end_time),
+            )
+            count = cursor.fetchone()[0]
+            return count > 0
+
     def get_threshold_summary(self, summary_id: int) -> Optional[Dict]:
         """Get a threshold summary by ID.
 
@@ -1620,6 +1694,95 @@ class ActivityStorage:
             return dict(row) if row else None
 
     # =========================================================================
+    # Tag Management Methods
+    # =========================================================================
+
+    def get_all_tags(self) -> Dict[str, int]:
+        """Get all unique tags with their occurrence counts.
+
+        Returns:
+            Dict mapping tag name to occurrence count.
+        """
+        tag_counts = {}
+
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT tags FROM threshold_summaries WHERE tags IS NOT NULL"
+            )
+            for row in cursor.fetchall():
+                if row['tags']:
+                    try:
+                        tags = json.loads(row['tags'])
+                        for tag in tags:
+                            if tag:
+                                tag_counts[tag] = tag_counts.get(tag, 0) + 1
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+        return tag_counts
+
+    def consolidate_tags(self, canonical: str, variants: List[str]) -> int:
+        """Replace variant tags with canonical tag in all summaries.
+
+        Args:
+            canonical: The canonical tag name to use.
+            variants: List of variant tag names to replace.
+
+        Returns:
+            Number of summaries updated.
+        """
+        if not variants:
+            return 0
+
+        updated_count = 0
+
+        with self.get_connection() as conn:
+            # Get all summaries with tags
+            cursor = conn.execute(
+                "SELECT id, tags FROM threshold_summaries WHERE tags IS NOT NULL"
+            )
+            rows = cursor.fetchall()
+
+            for row in rows:
+                if not row['tags']:
+                    continue
+
+                try:
+                    tags = json.loads(row['tags'])
+                    original_tags = tags.copy()
+
+                    # Replace variants with canonical
+                    new_tags = []
+                    has_canonical = False
+                    for tag in tags:
+                        if tag in variants:
+                            if not has_canonical:
+                                new_tags.append(canonical)
+                                has_canonical = True
+                            # Skip the variant (it's being consolidated)
+                        elif tag == canonical:
+                            if not has_canonical:
+                                new_tags.append(canonical)
+                                has_canonical = True
+                        else:
+                            new_tags.append(tag)
+
+                    # Check if tags changed
+                    if new_tags != original_tags:
+                        conn.execute(
+                            "UPDATE threshold_summaries SET tags = ? WHERE id = ?",
+                            (json.dumps(new_tags), row['id'])
+                        )
+                        updated_count += 1
+
+                except (json.JSONDecodeError, TypeError):
+                    continue
+
+            conn.commit()
+
+        return updated_count
+
+    # =========================================================================
     # Report Generation Methods
     # =========================================================================
 
@@ -1645,6 +1808,7 @@ class ActivityStorage:
                 SELECT id, start_time, end_time, summary, screenshot_ids,
                        screenshot_count, model_used, config_snapshot,
                        inference_time_ms, created_at, regenerated_from, project,
+                       explanation, confidence,
                        'threshold' as source
                 FROM threshold_summaries
                 WHERE datetime(start_time) >= datetime(?)
@@ -1678,6 +1842,8 @@ class ActivityStorage:
                 result = dict(row)
                 result['screenshot_ids'] = []  # Sessions don't store this directly
                 result['config_snapshot'] = None
+                result['explanation'] = None  # Sessions don't have this
+                result['confidence'] = None  # Sessions don't have this
                 results.append(result)
 
         # Sort all results by start_time
@@ -2081,3 +2247,272 @@ class ActivityStorage:
                 (start.isoformat(), end.isoformat(), min_duration_minutes * 60, limit)
             )
             return [dict(row) for row in cursor.fetchall()]
+
+    # =========================================================================
+    # Exported Reports History
+    # =========================================================================
+
+    def save_exported_report(
+        self,
+        title: str,
+        time_range: str,
+        report_type: str,
+        format: str,
+        filename: str,
+        filepath: str,
+        file_size: int = None,
+        start_time: 'datetime' = None,
+        end_time: 'datetime' = None
+    ) -> int:
+        """Save exported report metadata to history.
+
+        Args:
+            title: Report title.
+            time_range: Original time range string (e.g., "last week").
+            report_type: Report type (summary, detailed, standup).
+            format: Export format (markdown, html, pdf, json).
+            filename: Just the filename.
+            filepath: Full path to the file.
+            file_size: Size of the exported file in bytes.
+            start_time: Parsed start of time range.
+            end_time: Parsed end of time range.
+
+        Returns:
+            ID of the inserted record.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO exported_reports
+                    (title, time_range, report_type, format, filename, filepath,
+                     file_size, start_time, end_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    title,
+                    time_range,
+                    report_type,
+                    format,
+                    filename,
+                    filepath,
+                    file_size,
+                    start_time.isoformat() if start_time else None,
+                    end_time.isoformat() if end_time else None,
+                ),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_exported_reports(self, limit: int = 50, offset: int = 0) -> List[Dict]:
+        """Get exported reports history, most recent first.
+
+        Args:
+            limit: Maximum number of records to return.
+            offset: Number of records to skip.
+
+        Returns:
+            List of exported report dicts.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, title, time_range, report_type, format, filename, filepath,
+                       file_size, start_time, end_time, created_at
+                FROM exported_reports
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def delete_exported_report(self, report_id: int) -> bool:
+        """Delete an exported report record (does not delete file).
+
+        Args:
+            report_id: ID of the report to delete.
+
+        Returns:
+            True if a record was deleted.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM exported_reports WHERE id = ?",
+                (report_id,),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    # =========================================================================
+    # Cached Reports (Daily/Weekly/Monthly)
+    # =========================================================================
+
+    def save_cached_report(
+        self,
+        period_type: str,
+        period_date: str,
+        start_time: 'datetime',
+        end_time: 'datetime',
+        executive_summary: str,
+        sections: List[Dict] = None,
+        analytics: Dict = None,
+        summary_ids: List[int] = None,
+        model_used: str = None,
+        inference_time_ms: int = None
+    ) -> int:
+        """Save or update a cached report.
+
+        Args:
+            period_type: 'daily', 'weekly', or 'monthly'.
+            period_date: Period identifier (e.g., '2025-12-30', '2025-W52', '2025-12').
+            start_time: Start of the period.
+            end_time: End of the period.
+            executive_summary: Generated executive summary.
+            sections: List of section dicts with title/content.
+            analytics: Analytics data dict.
+            summary_ids: IDs of source threshold summaries used.
+            model_used: LLM model used for generation.
+            inference_time_ms: Time taken to generate.
+
+        Returns:
+            ID of the inserted/updated record.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO cached_reports
+                    (period_type, period_date, start_time, end_time, executive_summary,
+                     sections_json, analytics_json, summary_ids_json, model_used, inference_time_ms)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(period_type, period_date) DO UPDATE SET
+                    start_time = excluded.start_time,
+                    end_time = excluded.end_time,
+                    executive_summary = excluded.executive_summary,
+                    sections_json = excluded.sections_json,
+                    analytics_json = excluded.analytics_json,
+                    summary_ids_json = excluded.summary_ids_json,
+                    model_used = excluded.model_used,
+                    inference_time_ms = excluded.inference_time_ms,
+                    created_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    period_type,
+                    period_date,
+                    start_time.isoformat(),
+                    end_time.isoformat(),
+                    executive_summary,
+                    json.dumps(sections) if sections else None,
+                    json.dumps(analytics) if analytics else None,
+                    json.dumps(summary_ids) if summary_ids else None,
+                    model_used,
+                    inference_time_ms,
+                ),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_cached_report(self, period_type: str, period_date: str) -> Optional[Dict]:
+        """Get a cached report by period.
+
+        Args:
+            period_type: 'daily', 'weekly', or 'monthly'.
+            period_date: Period identifier.
+
+        Returns:
+            Cached report dict or None if not found.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, period_type, period_date, start_time, end_time,
+                       executive_summary, sections_json, analytics_json,
+                       summary_ids_json, model_used, inference_time_ms, created_at
+                FROM cached_reports
+                WHERE period_type = ? AND period_date = ?
+                """,
+                (period_type, period_date),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+
+            result = dict(row)
+            if result.get('sections_json'):
+                result['sections'] = json.loads(result['sections_json'])
+            if result.get('analytics_json'):
+                result['analytics'] = json.loads(result['analytics_json'])
+            if result.get('summary_ids_json'):
+                result['summary_ids'] = json.loads(result['summary_ids_json'])
+            return result
+
+    def get_cached_reports_in_range(
+        self,
+        period_type: str,
+        start_date: str,
+        end_date: str
+    ) -> List[Dict]:
+        """Get cached reports within a date range.
+
+        Args:
+            period_type: 'daily', 'weekly', or 'monthly'.
+            start_date: Start period date (inclusive).
+            end_date: End period date (inclusive).
+
+        Returns:
+            List of cached report dicts ordered by period_date.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, period_type, period_date, start_time, end_time,
+                       executive_summary, sections_json, analytics_json,
+                       summary_ids_json, model_used, inference_time_ms, created_at
+                FROM cached_reports
+                WHERE period_type = ?
+                  AND period_date >= ?
+                  AND period_date <= ?
+                ORDER BY period_date ASC
+                """,
+                (period_type, start_date, end_date),
+            )
+            results = []
+            for row in cursor.fetchall():
+                result = dict(row)
+                if result.get('sections_json'):
+                    result['sections'] = json.loads(result['sections_json'])
+                if result.get('analytics_json'):
+                    result['analytics'] = json.loads(result['analytics_json'])
+                if result.get('summary_ids_json'):
+                    result['summary_ids'] = json.loads(result['summary_ids_json'])
+                results.append(result)
+            return results
+
+    def get_missing_daily_reports(self, days_back: int = 7) -> List[str]:
+        """Get dates that don't have cached daily reports.
+
+        Args:
+            days_back: How many days to look back.
+
+        Returns:
+            List of date strings (YYYY-MM-DD) missing cached reports.
+        """
+        from datetime import timedelta
+
+        today = datetime.now().date()
+        expected_dates = set()
+        for i in range(1, days_back + 1):  # Start from 1 (yesterday)
+            d = today - timedelta(days=i)
+            expected_dates.add(d.strftime('%Y-%m-%d'))
+
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT period_date FROM cached_reports
+                WHERE period_type = 'daily'
+                  AND period_date >= ?
+                """,
+                ((today - timedelta(days=days_back)).strftime('%Y-%m-%d'),),
+            )
+            existing_dates = set(row[0] for row in cursor.fetchall())
+
+        return sorted(expected_dates - existing_dates, reverse=True)

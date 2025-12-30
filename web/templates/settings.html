@@ -898,6 +898,153 @@
             color: var(--text);
             line-height: 1.5;
         }
+
+        /* Tag Management Styles */
+        .tag-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 10px;
+        }
+
+        .analysis-status {
+            font-size: 0.85rem;
+            color: var(--muted);
+        }
+
+        .analysis-status.loading {
+            color: var(--accent);
+        }
+
+        .analysis-status.error {
+            color: var(--danger);
+        }
+
+        .analysis-status.success {
+            color: var(--success);
+        }
+
+        .tag-consolidation-results {
+            margin-top: 16px;
+            padding: 16px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+
+        .consolidation-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .consolidation-header h4 {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--text);
+            margin: 0;
+        }
+
+        .select-all-toggle label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.85rem;
+            color: var(--muted);
+            cursor: pointer;
+        }
+
+        .consolidation-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .consolidation-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            margin-bottom: 8px;
+            background: var(--surface);
+            transition: border-color 0.2s;
+        }
+
+        .consolidation-item:hover {
+            border-color: var(--accent);
+        }
+
+        .consolidation-item.selected {
+            border-color: var(--accent);
+            background: rgba(var(--accent-rgb), 0.05);
+        }
+
+        .consolidation-checkbox {
+            margin-top: 2px;
+        }
+
+        .consolidation-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .consolidation-canonical {
+            font-weight: 600;
+            color: var(--accent);
+            font-size: 0.95rem;
+            margin-bottom: 4px;
+        }
+
+        .consolidation-canonical .arrow {
+            color: var(--muted);
+            margin: 0 4px;
+        }
+
+        .consolidation-variants {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 6px;
+        }
+
+        .variant-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            font-size: 0.8rem;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            color: var(--text);
+        }
+
+        .variant-tag.canonical {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: var(--text-inverse);
+        }
+
+        .consolidation-count {
+            font-size: 0.8rem;
+            color: var(--muted);
+            margin-top: 6px;
+        }
+
+        .consolidation-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 16px;
+            padding-top: 12px;
+            border-top: 1px solid var(--border);
+        }
+
+        .consolidation-actions button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body>
@@ -1264,6 +1411,70 @@
                         <div class="progress-bar">
                             <div class="progress-fill" id="storage_progress" style="width: 0%;"></div>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tag Management -->
+            <div class="settings-section">
+                <h2>
+                    <svg class="section-icon" viewBox="0 0 24 24">
+                        <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+                        <line x1="7" y1="7" x2="7.01" y2="7"></line>
+                    </svg>
+                    Tag Management
+                </h2>
+
+                <div class="settings-row column">
+                    <div class="settings-label">
+                        <h3>Consolidate Similar Tags</h3>
+                        <p>Use AI to identify and merge duplicate/similar tags (e.g., "debugging", "Debugging", "debug")</p>
+                    </div>
+                    <div class="tag-actions">
+                        <button type="button" class="secondary" onclick="analyzeTagsForConsolidation()" id="analyzeTagsBtn">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            </svg>
+                            Analyze Tags
+                        </button>
+                        <span id="tagAnalysisStatus" class="analysis-status"></span>
+                    </div>
+                </div>
+
+                <!-- Tag Analysis Results (hidden initially) -->
+                <div id="tagConsolidationResults" class="tag-consolidation-results" style="display: none;">
+                    <div class="consolidation-header">
+                        <h4>Suggested Consolidations</h4>
+                        <span class="select-all-toggle">
+                            <label>
+                                <input type="checkbox" id="selectAllConsolidations" onchange="toggleAllConsolidations()">
+                                Select All
+                            </label>
+                        </span>
+                    </div>
+                    <div id="consolidationList" class="consolidation-list">
+                        <!-- Dynamically populated -->
+                    </div>
+                    <div class="consolidation-actions">
+                        <button type="button" onclick="applySelectedConsolidations()" id="applyConsolidationsBtn" disabled>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="20 6 9 17 4 12"></polyline>
+                            </svg>
+                            Apply Selected
+                        </button>
+                        <button type="button" class="secondary" onclick="cancelConsolidation()">Cancel</button>
+                    </div>
+                </div>
+
+                <!-- Tag Stats -->
+                <div class="settings-row">
+                    <div class="settings-label">
+                        <h3>Tag Statistics</h3>
+                        <p>Current tag counts</p>
+                    </div>
+                    <div class="settings-control">
+                        <span class="stat-value"><span id="uniqueTagCount">-</span> unique tags</span>
                     </div>
                 </div>
             </div>
@@ -2199,6 +2410,205 @@
         function getConfigInfo(elementId) {
             return configMapping[elementId] || { section: 'capture', key: elementId };
         }
+
+        // ==================== Tag Management Functions ====================
+
+        let tagConsolidationData = [];  // Store suggested consolidations
+
+        // Load tag statistics on page load
+        async function loadTagStats() {
+            try {
+                const response = await fetch('/api/tags');
+                const data = await response.json();
+                if (data.total_unique !== undefined) {
+                    document.getElementById('uniqueTagCount').textContent = data.total_unique;
+                }
+            } catch (error) {
+                console.error('Error loading tag stats:', error);
+            }
+        }
+
+        // Analyze tags for consolidation using AI
+        async function analyzeTagsForConsolidation() {
+            const btn = document.getElementById('analyzeTagsBtn');
+            const status = document.getElementById('tagAnalysisStatus');
+            const resultsDiv = document.getElementById('tagConsolidationResults');
+
+            btn.disabled = true;
+            status.textContent = 'Analyzing tags with AI...';
+            status.className = 'analysis-status loading';
+            resultsDiv.style.display = 'none';
+
+            try {
+                const response = await fetch('/api/tags/suggest-consolidation', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ min_count: 1 })
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                tagConsolidationData = data.consolidations || [];
+
+                if (tagConsolidationData.length === 0) {
+                    status.textContent = 'No consolidation suggestions found';
+                    status.className = 'analysis-status';
+                    btn.disabled = false;
+                    return;
+                }
+
+                // Render consolidation suggestions
+                renderConsolidationSuggestions(tagConsolidationData);
+                resultsDiv.style.display = 'block';
+                status.textContent = `Found ${tagConsolidationData.length} consolidation groups`;
+                status.className = 'analysis-status success';
+
+            } catch (error) {
+                status.textContent = `Error: ${error.message}`;
+                status.className = 'analysis-status error';
+                console.error('Tag analysis error:', error);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // Render consolidation suggestions
+        function renderConsolidationSuggestions(consolidations) {
+            const list = document.getElementById('consolidationList');
+            list.innerHTML = '';
+
+            consolidations.forEach((group, index) => {
+                const item = document.createElement('div');
+                item.className = 'consolidation-item';
+                item.dataset.index = index;
+
+                const variantsHtml = group.variants.map(v =>
+                    `<span class="variant-tag ${v === group.canonical ? 'canonical' : ''}">${escapeHtml(v)}</span>`
+                ).join('');
+
+                item.innerHTML = `
+                    <input type="checkbox" class="consolidation-checkbox" data-index="${index}" onchange="updateConsolidationSelection()">
+                    <div class="consolidation-content">
+                        <div class="consolidation-canonical">
+                            <span class="arrow">→</span> ${escapeHtml(group.canonical)}
+                        </div>
+                        <div class="consolidation-variants">
+                            ${variantsHtml}
+                        </div>
+                        <div class="consolidation-count">
+                            ${group.total_count || 0} occurrences across ${group.variants.length} variants
+                        </div>
+                    </div>
+                `;
+
+                // Click on item to toggle checkbox
+                item.addEventListener('click', (e) => {
+                    if (e.target.type !== 'checkbox') {
+                        const checkbox = item.querySelector('.consolidation-checkbox');
+                        checkbox.checked = !checkbox.checked;
+                        updateConsolidationSelection();
+                    }
+                });
+
+                list.appendChild(item);
+            });
+        }
+
+        // Toggle all consolidation checkboxes
+        function toggleAllConsolidations() {
+            const selectAll = document.getElementById('selectAllConsolidations').checked;
+            document.querySelectorAll('.consolidation-checkbox').forEach(cb => {
+                cb.checked = selectAll;
+            });
+            updateConsolidationSelection();
+        }
+
+        // Update selection state and enable/disable apply button
+        function updateConsolidationSelection() {
+            const checkboxes = document.querySelectorAll('.consolidation-checkbox');
+            const applyBtn = document.getElementById('applyConsolidationsBtn');
+            const selectedCount = Array.from(checkboxes).filter(cb => cb.checked).length;
+
+            applyBtn.disabled = selectedCount === 0;
+            applyBtn.textContent = selectedCount > 0 ? `Apply Selected (${selectedCount})` : 'Apply Selected';
+
+            // Update item selected state
+            checkboxes.forEach(cb => {
+                const item = cb.closest('.consolidation-item');
+                item.classList.toggle('selected', cb.checked);
+            });
+
+            // Update select all checkbox state
+            const selectAll = document.getElementById('selectAllConsolidations');
+            selectAll.checked = selectedCount === checkboxes.length && checkboxes.length > 0;
+            selectAll.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+        }
+
+        // Apply selected consolidations
+        async function applySelectedConsolidations() {
+            const checkboxes = document.querySelectorAll('.consolidation-checkbox:checked');
+            const selectedIndices = Array.from(checkboxes).map(cb => parseInt(cb.dataset.index));
+
+            if (selectedIndices.length === 0) {
+                showToast('No consolidations selected', 'error');
+                return;
+            }
+
+            const selectedConsolidations = selectedIndices.map(i => tagConsolidationData[i]);
+
+            const applyBtn = document.getElementById('applyConsolidationsBtn');
+            applyBtn.disabled = true;
+            applyBtn.textContent = 'Applying...';
+
+            try {
+                const response = await fetch('/api/tags/consolidate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ consolidations: selectedConsolidations })
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                showToast(`Consolidated ${data.tags_consolidated} tag groups, updated ${data.updated_summaries} summaries`, 'success');
+
+                // Hide results and refresh stats
+                cancelConsolidation();
+                loadTagStats();
+
+            } catch (error) {
+                showToast(`Error: ${error.message}`, 'error');
+                console.error('Consolidation error:', error);
+            } finally {
+                applyBtn.disabled = false;
+                updateConsolidationSelection();
+            }
+        }
+
+        // Cancel consolidation (hide results)
+        function cancelConsolidation() {
+            document.getElementById('tagConsolidationResults').style.display = 'none';
+            document.getElementById('tagAnalysisStatus').textContent = '';
+            document.getElementById('selectAllConsolidations').checked = false;
+            tagConsolidationData = [];
+        }
+
+        // Escape HTML to prevent XSS
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Load tag stats on page load
+        document.addEventListener('DOMContentLoaded', loadTagStats);
     </script>
 </body>
 </html>

@@ -219,7 +219,7 @@ class HybridSummarizer:
         """
         context = f" (captured from {app_name})" if app_name else ""
         prompt = (
-            f"Describe this developer screenshot{context} in ONE sentence. "
+            f"Describe this screenshot{context} in ONE sentence. "
             "Focus on: what app is shown, what content/activity is visible. "
             "Be specific about window titles, file names, or visible text."
         )
@@ -278,7 +278,7 @@ class HybridSummarizer:
             Raw LLM response (to be parsed by caller).
         """
         prompt_parts = [
-            "You are summarizing a developer's work activity.",
+            "You are summarizing work activity from screen recordings.",
             "",
         ]
 
@@ -308,6 +308,8 @@ class HybridSummarizer:
             "- The activity with MOST TIME (marked PRIMARY) should be your main focus",
             "- Use screenshot descriptions to understand WHAT they were doing",
             "- Write naturally - don't quote percentages in the summary",
+            "- Start directly with the action (e.g., 'Worked on...', 'Reviewed...', 'Edited...')",
+            "- Do NOT start with 'The user' or 'The developer'",
             "",
             "Your response MUST follow this exact format:",
             "",
@@ -325,7 +327,7 @@ class HybridSummarizer:
 
     def summarize_hour(self, screenshot_paths: list[str]) -> str:
         """
-        Summarize developer activity from a set of screenshots.
+        Summarize activity from a set of screenshots.
 
         Takes 4-6 screenshot paths, extracts OCR from the middle screenshot
         for grounding, and uses a vision LLM to generate a summary.
@@ -334,7 +336,7 @@ class HybridSummarizer:
             screenshot_paths: List of 4-6 screenshot file paths.
 
         Returns:
-            A 2-3 sentence summary of the developer activity.
+            A 2-3 sentence summary of the activity.
 
         Raises:
             ValueError: If screenshot_paths is empty.
@@ -369,11 +371,12 @@ class HybridSummarizer:
         # Build prompt
         if ocr_text:
             prompt = (
-                f"Summarize the developer activity across these screenshots in 2-3 sentences. "
+                f"Summarize the activity across these screenshots in 2-3 sentences. "
+                f"Start directly with the action, not 'The user' or 'The developer'. "
                 f"Here's OCR text from one screenshot for context: {ocr_text}"
             )
         else:
-            prompt = "Summarize the developer activity across these screenshots in 2-3 sentences."
+            prompt = "Summarize the activity across these screenshots in 2-3 sentences. Start directly with the action, not 'The user' or 'The developer'."
 
         return self._call_ollama_api(prompt, images_base64)
 
@@ -476,7 +479,7 @@ class HybridSummarizer:
 
         # Build prompt
         prompt_parts = [
-            "You are summarizing a developer's work activity.",
+            "You are summarizing work activity from screen recordings.",
             "",
         ]
 
@@ -529,6 +532,8 @@ class HybridSummarizer:
             "CONFIDENCE: [A number from 0.0 to 1.0. 1.0 = very confident with clear evidence. 0.5 = moderate, some ambiguity. 0.0 = guessing, unclear content]",
             "",
             "Guidelines for SUMMARY:",
+            "- Start directly with the action verb (e.g., 'Worked on...', 'Reviewed...', 'Implemented...')",
+            "- Do NOT start with 'The user' or 'The developer'",
             "- If activity clearly belongs to a project, mention the project name",
             "  - Format: \"[Action verb] [what] in/for [project/context]\"",
             "- If activity is general (browsing, reading, communication), describe the activity type",
