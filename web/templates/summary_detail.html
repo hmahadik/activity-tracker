@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Summary Details - Activity Tracker</title>
+    <link rel="stylesheet" href="/static/styles/base.css">
+    <script src="/static/js/utils.js"></script>
     <style>
         :root {
             color-scheme: light dark;
@@ -610,6 +612,47 @@
             line-height: 1.6;
             color: var(--text);
         }
+
+        /* Tags section */
+        .tags-section {
+            margin-top: 16px;
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .tags-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-right: 4px;
+        }
+
+        .tag-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            font-size: 0.8rem;
+            color: var(--text);
+            cursor: default;
+            transition: all 0.2s;
+        }
+
+        .tag-badge:hover {
+            background: var(--accent);
+            color: var(--text-inverse);
+            border-color: var(--accent);
+        }
+
+        .tag-badge svg {
+            width: 12px;
+            height: 12px;
+            margin-right: 4px;
+        }
     </style>
 </head>
 <body>
@@ -769,6 +812,24 @@
                 `;
             }
 
+            // Build tags section if available
+            let tagsSection = '';
+            const tags = summary.tags || [];
+            if (tags.length > 0) {
+                tagsSection = `
+                    <div class="tags-section">
+                        <span class="tags-label">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
+                                <line x1="7" y1="7" x2="7.01" y2="7"/>
+                            </svg>
+                            Tags:
+                        </span>
+                        ${tags.map(tag => `<span class="tag-badge">${escapeHtml(tag)}</span>`).join('')}
+                    </div>
+                `;
+            }
+
             let html = `
                 <!-- Summary Card -->
                 <div class="summary-card">
@@ -793,27 +854,54 @@
                     </div>
                     <div class="summary-text">${summary.summary}</div>
                     ${explanationSection}
-                </div>
-
-                <!-- Screenshots -->
-                <div class="section">
-                    <div class="section-header">
-                        <h2 class="section-title">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-                            Screenshots
-                        </h2>
-                        <span class="section-count">${screenshots.length}</span>
-                    </div>
-                    <div class="screenshots-grid">
-                        ${screenshots.map((s, i) => `
-                            <div class="screenshot-thumb" onclick="openScreenshot(${i})">
-                                <img src="/thumbnail/${s.id}" alt="Screenshot" loading="lazy">
-                                <span class="time-badge">${s.formatted_time}</span>
-                            </div>
-                        `).join('')}
-                    </div>
+                    ${tagsSection}
                 </div>
             `;
+
+            // API Request / Prompt (moved up - right after summary card)
+            if (summary.prompt_text) {
+                // Parse screenshot IDs used from prompt_text
+                const screenshotIdsMatch = summary.prompt_text.match(/Screenshot IDs used: \[([\d, ]+)\]/);
+                let usedScreenshotIds = [];
+                if (screenshotIdsMatch && screenshotIdsMatch[1] && screenshotIdsMatch[1] !== 'none') {
+                    usedScreenshotIds = screenshotIdsMatch[1].split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+                }
+
+                // Filter screenshots to only those used
+                const usedScreenshots = usedScreenshotIds.length > 0
+                    ? screenshots.filter(s => usedScreenshotIds.includes(s.id))
+                    : [];
+
+                html += `
+                    <div class="section">
+                        <div class="section-header">
+                            <h2 class="section-title">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                                API Request
+                            </h2>
+                        </div>
+                        ${usedScreenshots.length > 0 ? `
+                            <div style="margin-bottom: 16px;">
+                                <div style="font-size: 0.85rem; color: var(--muted); margin-bottom: 8px;">
+                                    Screenshots sent to LLM (${usedScreenshots.length} of ${screenshots.length})
+                                </div>
+                                <div class="screenshots-grid" style="grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));">
+                                    ${usedScreenshots.map((s) => {
+                                        const originalIndex = screenshots.findIndex(ss => ss.id === s.id);
+                                        return `
+                                            <div class="screenshot-thumb" onclick="openScreenshot(${originalIndex})" style="aspect-ratio: 16/10;">
+                                                <img src="/thumbnail/${s.id}" alt="Screenshot" loading="lazy">
+                                                <span class="time-badge">${s.formatted_time}</span>
+                                            </div>
+                                        `;
+                                    }).join('')}
+                                </div>
+                            </div>
+                        ` : ''}
+                        <div class="prompt-display">${escapeHtml(summary.prompt_text)}</div>
+                    </div>
+                `;
+            }
 
             // Window durations section
             if (windowDurations.length > 0) {
@@ -903,51 +991,6 @@
                 `;
             }
 
-            // API Request / Prompt
-            if (summary.prompt_text) {
-                // Parse screenshot IDs used from prompt_text
-                const screenshotIdsMatch = summary.prompt_text.match(/Screenshot IDs used: \[([\d, ]+)\]/);
-                let usedScreenshotIds = [];
-                if (screenshotIdsMatch && screenshotIdsMatch[1] && screenshotIdsMatch[1] !== 'none') {
-                    usedScreenshotIds = screenshotIdsMatch[1].split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
-                }
-
-                // Filter screenshots to only those used
-                const usedScreenshots = usedScreenshotIds.length > 0
-                    ? screenshots.filter(s => usedScreenshotIds.includes(s.id))
-                    : [];
-
-                html += `
-                    <div class="section">
-                        <div class="section-header">
-                            <h2 class="section-title">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                                API Request
-                            </h2>
-                        </div>
-                        ${usedScreenshots.length > 0 ? `
-                            <div style="margin-bottom: 16px;">
-                                <div style="font-size: 0.85rem; color: var(--muted); margin-bottom: 8px;">
-                                    Screenshots sent to LLM (${usedScreenshots.length} of ${screenshots.length})
-                                </div>
-                                <div class="screenshots-grid" style="grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));">
-                                    ${usedScreenshots.map((s) => {
-                                        const originalIndex = screenshots.findIndex(ss => ss.id === s.id);
-                                        return `
-                                            <div class="screenshot-thumb" onclick="openScreenshot(${originalIndex})" style="aspect-ratio: 16/10;">
-                                                <img src="/thumbnail/${s.id}" alt="Screenshot" loading="lazy">
-                                                <span class="time-badge">${s.formatted_time}</span>
-                                            </div>
-                                        `;
-                                    }).join('')}
-                                </div>
-                            </div>
-                        ` : ''}
-                        <div class="prompt-display">${escapeHtml(summary.prompt_text)}</div>
-                    </div>
-                `;
-            }
-
             // Version history
             if (data.versions && data.versions.length > 1) {
                 html += `
@@ -974,6 +1017,27 @@
                     </div>
                 `;
             }
+
+            // Screenshots (moved to bottom)
+            html += `
+                <div class="section">
+                    <div class="section-header">
+                        <h2 class="section-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                            All Screenshots
+                        </h2>
+                        <span class="section-count">${screenshots.length}</span>
+                    </div>
+                    <div class="screenshots-grid">
+                        ${screenshots.map((s, i) => `
+                            <div class="screenshot-thumb" onclick="openScreenshot(${i})">
+                                <img src="/thumbnail/${s.id}" alt="Screenshot" loading="lazy">
+                                <span class="time-badge">${s.formatted_time}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
 
             document.getElementById('content').innerHTML = html;
         }
@@ -1057,7 +1121,7 @@
                 const result = await response.json();
 
                 if (result.status === 'queued') {
-                    alert('Regeneration queued. The page will reload when complete.');
+                    showToast('Regeneration queued. The page will reload when complete.', 'success');
                     // Poll for completion
                     const interval = setInterval(async () => {
                         const statusRes = await fetch('/api/threshold-summaries/worker-status');
@@ -1069,7 +1133,7 @@
                     }, 2000);
                 }
             } catch (error) {
-                alert('Failed to regenerate: ' + error.message);
+                showToast('Failed to regenerate: ' + error.message, 'error');
             }
         }
 
@@ -1085,10 +1149,10 @@
                 if (result.status === 'deleted') {
                     window.location.href = '/timeline';
                 } else {
-                    alert('Failed to delete: ' + (result.error || 'Unknown error'));
+                    showToast('Failed to delete: ' + (result.error || 'Unknown error'), 'error');
                 }
             } catch (error) {
-                alert('Failed to delete: ' + error.message);
+                showToast('Failed to delete: ' + error.message, 'error');
             }
         }
 
