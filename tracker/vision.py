@@ -98,6 +98,8 @@ class HybridSummarizer:
         include_focus_context: bool = True,
         include_screenshots: bool = True,
         include_ocr: bool = True,
+        # Two-stage summarization
+        two_stage_summarization: bool = True,
         # Legacy (backward compatibility)
         summarization_mode: str = None,
     ):
@@ -114,6 +116,8 @@ class HybridSummarizer:
             include_focus_context: Include window titles and duration info (default True).
             include_screenshots: Include screenshot images (default True).
             include_ocr: Include OCR text extraction (default True).
+            two_stage_summarization: Use two-stage approach - describe screenshots first,
+                then summarize with time data. Improves time accuracy (default True).
             summarization_mode: Deprecated - use include_* flags instead.
         """
         self.model = model
@@ -122,6 +126,7 @@ class HybridSummarizer:
         self.max_samples = max_samples
         self.sample_interval_minutes = sample_interval_minutes
         self.focus_weighted_sampling = focus_weighted_sampling
+        self.two_stage_summarization = two_stage_summarization
 
         # Handle legacy summarization_mode for backward compatibility
         if summarization_mode:
@@ -197,6 +202,127 @@ class HybridSummarizer:
             logger.error(f"LLM inference failed after {inference_time:.2f}s: {e}")
             raise RuntimeError(f"Ollama inference failed: {e}") from e
 
+    def _describe_screenshot(self, image_b64: str, app_name: str = None) -> str:
+        """
+        Stage 1 of two-stage summarization: Describe a single screenshot.
+
+        Gets a brief text description of what's visible in the screenshot,
+        without any time/focus context. This description is later combined
+        with time breakdown data for more accurate summarization.
+
+        Args:
+            image_b64: Base64-encoded image.
+            app_name: Optional app name for context (e.g., "Chrome", "Tilix").
+
+        Returns:
+            Brief text description of the screenshot content.
+        """
+        context = f" (captured from {app_name})" if app_name else ""
+        prompt = (
+            f"Describe this developer screenshot{context} in ONE sentence. "
+            "Focus on: what app is shown, what content/activity is visible. "
+            "Be specific about window titles, file names, or visible text."
+        )
+
+        try:
+            response = self._call_ollama_api(prompt, [image_b64])
+            # Truncate long responses
+            return response.strip()[:200]
+        except Exception as e:
+            logger.warning(f"Failed to describe screenshot: {e}")
+            return f"[{app_name or 'Unknown app'}] (description unavailable)"
+
+    def _describe_screenshots_batch(
+        self,
+        sampled_screenshots: list[dict],
+        images_base64: list[str],
+    ) -> list[str]:
+        """
+        Stage 1: Get text descriptions for all sampled screenshots.
+
+        Args:
+            sampled_screenshots: List of screenshot dicts with app_name.
+            images_base64: List of base64-encoded images (same order).
+
+        Returns:
+            List of text descriptions for each screenshot.
+        """
+        descriptions = []
+        for i, (screenshot, img_b64) in enumerate(zip(sampled_screenshots, images_base64)):
+            app_name = screenshot.get('app_name', 'Unknown')
+            logger.debug(f"Describing screenshot {i+1}/{len(images_base64)} ({app_name})")
+            desc = self._describe_screenshot(img_b64, app_name)
+            descriptions.append(f"[{app_name}] {desc}")
+        return descriptions
+
+    def _summarize_with_descriptions(
+        self,
+        focus_context: str,
+        screenshot_descriptions: list[str],
+        ocr_section: str = None,
+        previous_summary: str = None,
+    ) -> str:
+        """
+        Stage 2 of two-stage summarization: Text-only summarization.
+
+        Combines time breakdown data with screenshot descriptions (no images)
+        to produce a summary that properly reflects time spent.
+
+        Args:
+            focus_context: Time breakdown string from _build_focus_context.
+            screenshot_descriptions: List of text descriptions from Stage 1.
+            ocr_section: Optional OCR text section.
+            previous_summary: Optional previous summary for context.
+
+        Returns:
+            Raw LLM response (to be parsed by caller).
+        """
+        prompt_parts = [
+            "You are summarizing a developer's work activity.",
+            "",
+        ]
+
+        if previous_summary:
+            prompt_parts.append(f"Previous context: {previous_summary}")
+            prompt_parts.append("")
+
+        if focus_context:
+            prompt_parts.append("## Time Breakdown (from focus tracking)")
+            prompt_parts.append(focus_context)
+            prompt_parts.append("")
+
+        if screenshot_descriptions:
+            prompt_parts.append("## What was visible on screen")
+            prompt_parts.extend(f"- {desc}" for desc in screenshot_descriptions)
+            prompt_parts.append("")
+
+        if ocr_section:
+            prompt_parts.append("## Window Content (OCR)")
+            prompt_parts.append(ocr_section)
+            prompt_parts.append("")
+
+        prompt_parts.extend([
+            "Based on the TIME BREAKDOWN and screenshot descriptions, summarize the PRIMARY activities.",
+            "",
+            "CRITICAL RULES:",
+            "- The activity with MOST TIME (marked PRIMARY) should be your main focus",
+            "- Use screenshot descriptions to understand WHAT they were doing",
+            "- Write naturally - don't quote percentages in the summary",
+            "",
+            "Your response MUST follow this exact format:",
+            "",
+            "SUMMARY: [1-2 sentences, max 30 words describing the main activities]",
+            "",
+            "EXPLANATION: [What you observed that led to this summary]",
+            "",
+            "TAGS: [List of tags for categorization]",
+            "",
+            "CONFIDENCE: [0.0 to 1.0]",
+        ])
+
+        prompt = '\n'.join(prompt_parts)
+        return self._call_ollama_api(prompt)  # No images - text only
+
     def summarize_hour(self, screenshot_paths: list[str]) -> str:
         """
         Summarize developer activity from a set of screenshots.
@@ -257,7 +383,7 @@ class HybridSummarizer:
         ocr_texts: list[dict],
         previous_summary: str = None,
         focus_events: list[dict] = None,
-    ) -> tuple[str, int, str, list, str, float]:
+    ) -> tuple[str, int, str, list, str, list[str], float]:
         """
         Summarize a session with context continuity and focus tracking data.
 
@@ -273,7 +399,7 @@ class HybridSummarizer:
 
         Returns:
             Tuple of (summary text, inference time in ms, prompt text, screenshot IDs used,
-            explanation, confidence).
+            explanation, tags, confidence).
 
         Raises:
             ValueError: If screenshots is empty.
@@ -285,16 +411,27 @@ class HybridSummarizer:
         start_time = time.time()
 
         # Sample screenshots (focus-weighted if enabled and focus data available)
+        sampling_rationale = ""
         if self.focus_weighted_sampling and focus_events:
             sampled = self._sample_screenshots_weighted(
                 screenshots, focus_events, self.max_samples, self.sample_interval_minutes
             )
             logger.info(f"Focus-weighted sampled {len(sampled)} of {len(screenshots)} screenshots")
+
+            # Build sampling rationale for debugging
+            sampling_rationale = self._build_sampling_rationale(
+                screenshots, sampled, focus_events, "focus-weighted"
+            )
         else:
             sampled = self._sample_screenshots_uniform(
                 screenshots, self.max_samples, self.sample_interval_minutes
             )
             logger.info(f"Uniformly sampled {len(sampled)} of {len(screenshots)} screenshots")
+
+            # Build sampling rationale for debugging
+            sampling_rationale = self._build_sampling_rationale(
+                screenshots, sampled, focus_events, "uniform"
+            )
 
         # Extract IDs of screenshots actually used
         screenshot_ids_used = [s["id"] for s in sampled]
@@ -420,42 +557,81 @@ class HybridSummarizer:
         # Format screenshot IDs used (for UI display)
         screenshot_ids_str = ", ".join(str(sid) for sid in screenshot_ids_used) if screenshot_ids_used else "none"
 
-        api_request_info = (
-            f"Model: {self.model}\n"
-            f"Content: {', '.join(content_mode)}\n"
-            f"Images: {len(images_base64)} base64-encoded JPEG images (max 1024px)\n"
-            f"Screenshot IDs used: [{screenshot_ids_str}]\n"
-            f"Endpoint: {self.ollama_host}/api/chat\n\n"
-            f"Prompt:\n{prompt}"
+        # Decide between two-stage and single-stage summarization
+        use_two_stage = (
+            self.two_stage_summarization
+            and images_base64
+            and focus_context
         )
 
-        # Call LLM (pass images only if we have them)
-        response = self._call_ollama_api(prompt, images_base64 if images_base64 else None)
+        if use_two_stage:
+            # TWO-STAGE SUMMARIZATION
+            # Stage 1: Describe each screenshot (with images)
+            logger.info(f"Two-stage summarization: Stage 1 - describing {len(images_base64)} screenshots")
+            screenshot_descriptions = self._describe_screenshots_batch(sampled, images_base64)
+
+            # Stage 2: Summarize with text only (no images)
+            logger.info("Two-stage summarization: Stage 2 - text-only summarization")
+            response = self._summarize_with_descriptions(
+                focus_context=focus_context,
+                screenshot_descriptions=screenshot_descriptions,
+                ocr_section=ocr_section if ocr_section else None,
+                previous_summary=previous_summary,
+            )
+
+            # Build API request info showing two-stage approach
+            stage1_desc = "\n".join(f"  - {desc}" for desc in screenshot_descriptions)
+            api_request_info = (
+                f"Model: {self.model}\n"
+                f"Method: Two-stage summarization\n"
+                f"Content: {', '.join(content_mode)}\n"
+                f"Screenshot IDs used: [{screenshot_ids_str}]\n"
+                f"Endpoint: {self.ollama_host}/api/chat\n\n"
+                f"Sampling Rationale:\n{sampling_rationale}\n\n"
+                f"Stage 1 - Screenshot Descriptions:\n{stage1_desc}\n\n"
+                f"Stage 2 - Focus Context:\n{focus_context}"
+            )
+        else:
+            # SINGLE-STAGE SUMMARIZATION (legacy)
+            api_request_info = (
+                f"Model: {self.model}\n"
+                f"Method: Single-stage (images + text)\n"
+                f"Content: {', '.join(content_mode)}\n"
+                f"Images: {len(images_base64)} base64-encoded JPEG images (max 1024px)\n"
+                f"Screenshot IDs used: [{screenshot_ids_str}]\n"
+                f"Endpoint: {self.ollama_host}/api/chat\n\n"
+                f"Prompt:\n{prompt}"
+            )
+
+            # Call LLM (pass images only if we have them)
+            response = self._call_ollama_api(prompt, images_base64 if images_base64 else None)
 
         inference_ms = int((time.time() - start_time) * 1000)
 
         # Parse structured response
-        summary, explanation, confidence = self._parse_summary_response(response)
+        summary, explanation, tags, confidence = self._parse_summary_response(response)
 
-        return summary, inference_ms, api_request_info, screenshot_ids_used, explanation, confidence
+        return summary, inference_ms, api_request_info, screenshot_ids_used, explanation, tags, confidence
 
-    def _parse_summary_response(self, response: str) -> tuple[str, str, float]:
-        """Parse structured response into (summary, explanation, confidence).
+    def _parse_summary_response(self, response: str) -> tuple[str, str, list[str], float]:
+        """Parse structured response into (summary, explanation, tags, confidence).
 
         Expected format:
             SUMMARY: ...
             EXPLANATION: ...
+            TAGS: [comma-separated list of tags]
             CONFIDENCE: 0.X
 
         Args:
             response: Raw response from LLM.
 
         Returns:
-            Tuple of (summary, explanation, confidence).
+            Tuple of (summary, explanation, tags, confidence).
             Falls back gracefully if parsing fails.
         """
         summary = ""
         explanation = ""
+        tags = []
         confidence = 0.5  # Default if not parseable
 
         lines = response.strip().split('\n')
@@ -471,6 +647,12 @@ class HybridSummarizer:
             elif line_upper.startswith('EXPLANATION:'):
                 explanation = line_stripped[12:].strip()
                 current_section = 'explanation'
+            elif line_upper.startswith('TAGS:'):
+                tags_str = line_stripped[5:].strip()
+                # Parse comma-separated tags, handle brackets
+                tags_str = tags_str.strip('[]')
+                tags = [t.strip().strip('"\'') for t in tags_str.split(',') if t.strip()]
+                current_section = 'tags'
             elif line_upper.startswith('CONFIDENCE:'):
                 conf_str = line_stripped[11:].strip()
                 try:
@@ -485,6 +667,10 @@ class HybridSummarizer:
             elif current_section == 'explanation' and line_stripped:
                 # Multi-line explanation
                 explanation += ' ' + line_stripped
+            elif current_section == 'tags' and line_stripped:
+                # Multi-line tags (continuation)
+                additional = [t.strip().strip('"\'') for t in line_stripped.split(',') if t.strip()]
+                tags.extend(additional)
 
         # Fallback: if no structured format, use entire response as summary
         if not summary:
@@ -492,7 +678,7 @@ class HybridSummarizer:
             explanation = "Model did not follow structured format."
             confidence = 0.3
 
-        return summary.strip(), explanation.strip(), confidence
+        return summary.strip(), explanation.strip(), tags, confidence
 
     def _build_focus_context(self, focus_events: list[dict]) -> str:
         """
@@ -552,9 +738,21 @@ class HybridSummarizer:
             key=lambda x: -x[1]['total_seconds']
         )
 
+        # Calculate total for percentages
+        total_seconds = sum(stats['total_seconds'] for _, stats in sorted_items)
+
         lines = []
-        for (app, title), stats in sorted_items[:8]:  # Top 8
+        for i, ((app, title), stats) in enumerate(sorted_items[:8]):  # Top 8
             duration_str = self._format_duration(stats['total_seconds'])
+
+            # Calculate percentage and add PRIMARY/SECONDARY labels
+            pct = (stats['total_seconds'] / total_seconds * 100) if total_seconds > 0 else 0
+            if i == 0:
+                rank_label = f" **[{pct:.0f}% - PRIMARY]**"
+            elif i == 1 and pct >= 15:
+                rank_label = f" [{pct:.0f}% - SECONDARY]"
+            else:
+                rank_label = f" [{pct:.0f}%]"
 
             extra = []
             if stats['longest_session'] >= 300:  # 5+ min focus worth noting
@@ -565,12 +763,11 @@ class HybridSummarizer:
             extra_str = f" [{', '.join(extra)}]" if extra else ""
 
             if title and title != app:
-                lines.append(f"- {app} ({title}): {duration_str}{extra_str}")
+                lines.append(f"- {app} ({title}): {duration_str}{extra_str}{rank_label}")
             else:
-                lines.append(f"- {app}: {duration_str}{extra_str}")
+                lines.append(f"- {app}: {duration_str}{extra_str}{rank_label}")
 
-        # Summary stats
-        total_seconds = sum(e.get('duration_seconds', 0) or 0 for e in focus_events)
+        # Summary stats (use already calculated total_seconds)
         context_switches = self._count_context_switches(focus_events)
 
         lines.append(f"\nTotal tracked: {self._format_duration(total_seconds)}, {context_switches} context switches")
@@ -873,6 +1070,63 @@ class HybridSummarizer:
         )
 
         return sampled
+
+    def _build_sampling_rationale(
+        self,
+        all_screenshots: list[dict],
+        sampled: list[dict],
+        focus_events: list[dict],
+        method: str
+    ) -> str:
+        """
+        Build a human-readable explanation of why screenshots were sampled.
+
+        Args:
+            all_screenshots: All available screenshots.
+            sampled: Screenshots that were selected.
+            focus_events: Focus events used for weighting.
+            method: Sampling method ("focus-weighted" or "uniform").
+
+        Returns:
+            Human-readable rationale string.
+        """
+        lines = [f"Method: {method}"]
+        lines.append(f"Total screenshots: {len(all_screenshots)}")
+        lines.append(f"Sampled: {len(sampled)}")
+
+        if method == "focus-weighted" and focus_events:
+            # Calculate focus time by app
+            app_focus = {}
+            total_focus = 0
+            for event in focus_events:
+                app = event.get('app_name', 'Unknown')
+                duration = event.get('duration_seconds', 0) or 0
+                app_focus[app] = app_focus.get(app, 0) + duration
+                total_focus += duration
+
+            if total_focus > 0:
+                lines.append("\nFocus distribution:")
+                sorted_apps = sorted(app_focus.items(), key=lambda x: -x[1])
+                for app, duration in sorted_apps[:5]:  # Top 5 apps
+                    pct = (duration / total_focus) * 100
+                    mins = int(duration // 60)
+                    secs = int(duration % 60)
+                    lines.append(f"  - {app}: {mins}m {secs}s ({pct:.1f}%)")
+
+                if len(sorted_apps) > 5:
+                    lines.append(f"  ... and {len(sorted_apps) - 5} more apps")
+
+            # Count screenshots by app in sampled set
+            sampled_apps = {}
+            for s in sampled:
+                app = s.get('app_name', 'Unknown')
+                sampled_apps[app] = sampled_apps.get(app, 0) + 1
+
+            lines.append("\nScreenshots selected per app:")
+            for app, count in sorted(sampled_apps.items(), key=lambda x: -x[1]):
+                lines.append(f"  - {app}: {count}")
+
+        return "\n".join(lines)
 
     def extract_ocr(self, image_path: str) -> str:
         """

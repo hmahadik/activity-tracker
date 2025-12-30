@@ -122,6 +122,7 @@ class SummarizationConfig:
     include_previous_summary: bool = True  # Set by preset: quick=False, balanced/thorough=True
     focus_weighted_sampling: bool = True   # Set by preset: quick=False, balanced/thorough=True
     sample_interval_minutes: int = 10      # Computed from frequency
+    two_stage_summarization: bool = True   # Stage 1: describe screenshots, Stage 2: summarize with time data
 
     # Legacy (backward compatibility)
     summarization_mode: str = "ocr_and_screenshots"  # Deprecated

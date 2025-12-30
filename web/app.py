@@ -42,10 +42,79 @@ def get_db_connection():
     """Get a database connection."""
     if not DB_PATH.exists():
         abort(500, "Database not found. Is the tracker service running?")
-    
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _parse_terminal_context_for_ui(context_json: str) -> str:
+    """Parse terminal context JSON and return enriched title for UI display.
+
+    Matches the logic in vision.py._parse_terminal_context to ensure
+    UI displays the same enriched titles as the API request.
+
+    Args:
+        context_json: JSON string with terminal introspection data.
+
+    Returns:
+        Enriched title string like "vim daemon.py in activity-tracker"
+        or empty string if parsing fails.
+    """
+    import json
+    try:
+        ctx = json.loads(context_json)
+        parts = []
+
+        # Main process (skip shells for cleaner display)
+        fg_process = ctx.get('foreground_process', '')
+        shell = ctx.get('shell', '')
+        if fg_process and fg_process not in {'bash', 'zsh', 'fish', 'sh', 'dash'}:
+            # Include command args if they add context (e.g., "vim daemon.py")
+            full_cmd = ctx.get('full_command', '')
+            if full_cmd and ' ' in full_cmd:
+                # Get first meaningful arg (skip flags like -m, --version)
+                cmd_parts = full_cmd.split()
+                arg = None
+                for part in cmd_parts[1:]:
+                    if not part.startswith('-') and len(part) > 1:
+                        arg = part
+                        break
+                if arg:
+                    # Truncate long paths to just filename
+                    if '/' in arg:
+                        arg = arg.split('/')[-1]
+                    if len(arg) < 30:
+                        parts.append(f"{fg_process} {arg}")
+                    else:
+                        parts.append(fg_process)
+                else:
+                    parts.append(fg_process)
+            else:
+                parts.append(fg_process)
+        elif shell:
+            parts.append(f"{shell} (idle)")
+
+        # Working directory (just the project name)
+        cwd = ctx.get('working_directory', '')
+        if cwd:
+            dir_name = Path(cwd).name
+            if dir_name and dir_name not in parts:
+                parts.append(f"in {dir_name}")
+
+        # SSH indicator
+        if ctx.get('is_ssh'):
+            parts.append("[ssh]")
+
+        # Tmux session
+        tmux = ctx.get('tmux_session')
+        if tmux:
+            parts.append(f"[tmux:{tmux}]")
+
+        return ' '.join(parts) if parts else ''
+
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        return ''
 
 
 def get_screenshots_for_date(target_date):
@@ -663,6 +732,98 @@ def get_focus_summary():
         })
     except Exception as e:
         return jsonify({'error': f'Failed to get focus summary: {str(e)}'}), 500
+
+
+@app.route('/api/analytics/ai')
+def get_ai_analytics():
+    """Get AI summarization analytics for the dashboard.
+
+    Query params:
+        days: Number of days to look back (default: 7)
+
+    Returns:
+        {
+            "total_summaries": 45,
+            "avg_confidence": 0.72,
+            "confidence_distribution": {"high": 20, "medium": 18, "low": 7},
+            "tag_counts": {"coding": 15, "meetings": 8, ...},
+            "recent_summaries": [...],
+            "summaries_by_day": {...}
+        }
+    """
+    days = request.args.get('days', 7, type=int)
+
+    try:
+        storage = ActivityStorage()
+
+        # Calculate date range
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days)
+
+        # Get all summaries in range
+        all_summaries = []
+        for i in range(days):
+            date = (start_date + timedelta(days=i)).strftime('%Y-%m-%d')
+            day_summaries = storage.get_threshold_summaries_for_date(date)
+            all_summaries.extend(day_summaries)
+
+        # Calculate statistics
+        total = len(all_summaries)
+        confidences = [s.get('confidence') for s in all_summaries if s.get('confidence') is not None]
+        avg_confidence = sum(confidences) / len(confidences) if confidences else 0
+
+        # Confidence distribution
+        high = sum(1 for c in confidences if c >= 0.8)
+        medium = sum(1 for c in confidences if 0.5 <= c < 0.8)
+        low = sum(1 for c in confidences if c < 0.5)
+
+        # Tag counts
+        tag_counts = {}
+        for s in all_summaries:
+            tags = s.get('tags', [])
+            if tags:
+                for tag in tags:
+                    tag_lower = tag.lower().strip()
+                    if tag_lower:
+                        tag_counts[tag_lower] = tag_counts.get(tag_lower, 0) + 1
+
+        # Sort tags by count
+        sorted_tags = sorted(tag_counts.items(), key=lambda x: -x[1])
+
+        # Summaries by day for chart
+        summaries_by_day = {}
+        for s in all_summaries:
+            day = s.get('start_time', '')[:10]
+            if day:
+                summaries_by_day[day] = summaries_by_day.get(day, 0) + 1
+
+        # Recent summaries (last 10)
+        recent = sorted(all_summaries, key=lambda x: x.get('created_at', ''), reverse=True)[:10]
+        recent_formatted = [{
+            'id': s.get('id'),
+            'summary': s.get('summary', '')[:150] + ('...' if len(s.get('summary', '')) > 150 else ''),
+            'start_time': s.get('start_time'),
+            'end_time': s.get('end_time'),
+            'confidence': s.get('confidence'),
+            'tags': s.get('tags', []),
+            'model': s.get('model_used'),
+        } for s in recent]
+
+        return jsonify({
+            'total_summaries': total,
+            'avg_confidence': round(avg_confidence, 2),
+            'confidence_distribution': {
+                'high': high,
+                'medium': medium,
+                'low': low
+            },
+            'tag_counts': dict(sorted_tags[:30]),  # Top 30 tags
+            'recent_summaries': recent_formatted,
+            'summaries_by_day': summaries_by_day
+        })
+
+    except Exception as e:
+        return jsonify({'error': f'Failed to get AI analytics: {str(e)}'}), 500
 
 
 @app.route('/api/summaries/<date_string>')
@@ -1638,12 +1799,22 @@ def api_get_summary_detail(summary_id):
             focus_events = storage.get_focus_events_overlapping_range(start_dt, end_dt)
 
         # Calculate window durations from focus events
-        # Focus events already have duration_seconds computed
+        # Aggregate by (app_name, enriched_title) to match how vision.py builds focus context
         window_durations = {}
         for event in focus_events:
+            app_name = event.get('app_name', 'Unknown')
             title = event.get('window_title', 'Unknown')
-            # Use the pre-computed duration_seconds field
-            duration = event.get('duration_seconds', 0)
+
+            # Enrich with terminal context if available (same as vision.py)
+            terminal_context = event.get('terminal_context')
+            if terminal_context:
+                enriched = _parse_terminal_context_for_ui(terminal_context)
+                if enriched:
+                    title = enriched
+
+            # Truncate long titles
+            if len(title) > 60:
+                title = title[:57] + '...'
 
             # Clip duration to the summary time range if event spans boundaries
             event_start = datetime.fromisoformat(event['start_time']) if isinstance(event['start_time'], str) else event['start_time']
@@ -1658,18 +1829,15 @@ def api_get_summary_detail(summary_id):
                 duration = 0
 
             if duration > 0:
-                if title not in window_durations:
-                    window_durations[title] = 0
-                window_durations[title] += duration
-
-        # Note: Project-based filtering was removed in Phase 8.
-        # The LLM now interprets raw app/window usage data directly.
-        # The 'project' column in summaries is no longer populated.
+                key = (app_name, title)
+                if key not in window_durations:
+                    window_durations[key] = {'app_name': app_name, 'title': title, 'total_seconds': 0}
+                window_durations[key]['total_seconds'] += duration
 
         # Sort by duration descending
         window_durations_list = [
-            {'title': title, 'duration_seconds': dur}
-            for title, dur in sorted(window_durations.items(), key=lambda x: -x[1])
+            {'app_name': v['app_name'], 'title': v['title'], 'duration_seconds': v['total_seconds']}
+            for v in sorted(window_durations.values(), key=lambda x: -x['total_seconds'])
         ]
 
         # Calculate context switches (app changes within the time range)
