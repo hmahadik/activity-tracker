@@ -98,8 +98,8 @@ class HybridSummarizer:
         include_focus_context: bool = True,
         include_screenshots: bool = True,
         include_ocr: bool = True,
-        # Two-stage summarization
-        two_stage_summarization: bool = True,
+        # Two-stage summarization (disabled by default - single-stage with metadata is more accurate)
+        two_stage_summarization: bool = False,
         # Legacy (backward compatibility)
         summarization_mode: str = None,
     ):
@@ -219,15 +219,26 @@ class HybridSummarizer:
         """
         context = f" (captured from {app_name})" if app_name else ""
         prompt = (
-            f"Describe this screenshot{context} in ONE sentence. "
-            "Focus on: what app is shown, what content/activity is visible. "
-            "Be specific about window titles, file names, or visible text."
+            f"Describe this screenshot{context} in ONE detailed sentence. "
+            "Include:\n"
+            "- Window title from the title bar (quote it exactly if readable)\n"
+            "- What type of content is shown (code, webpage, document, settings, etc.)\n"
+            "- Any clearly readable text, file names, or UI elements\n"
+            "IMPORTANT: Only include details you can actually see. "
+            "If something is blurry or unclear, describe it generally rather than guessing."
         )
 
         try:
             response = self._call_ollama_api(prompt, [image_b64])
+            # Clean up common LLM artifacts
+            response = response.strip()
+            # Remove model artifacts like <start_of_image>, </end_of_turn>, etc.
+            for artifact in ['<start_of_image>', '</end_of_turn>', '<end_of_turn>',
+                           'captured from', 'in ONE sentence', 'RULES:']:
+                if artifact in response:
+                    response = response.split(artifact)[0].strip()
             # Truncate long responses
-            return response.strip()[:200]
+            return response[:200] if response else "(description unavailable)"
         except Exception as e:
             logger.warning(f"Failed to describe screenshot: {e}")
             return f"[{app_name or 'Unknown app'}] (description unavailable)"
@@ -306,10 +317,17 @@ class HybridSummarizer:
             "",
             "CRITICAL RULES:",
             "- The activity with MOST TIME (marked PRIMARY) should be your main focus",
-            "- Use screenshot descriptions to understand WHAT they were doing",
+            "- ONLY mention what is explicitly stated in the screenshot descriptions",
+            "- Do NOT invent project names, file names, or specific activities not mentioned",
+            "- If descriptions say 'text not readable', use general terms like 'terminal work' or 'browsing'",
             "- Write naturally - don't quote percentages in the summary",
-            "- Start directly with the action (e.g., 'Worked on...', 'Reviewed...', 'Edited...')",
-            "- Do NOT start with 'The user' or 'The developer'",
+            "",
+            "GRAMMAR RULES (important):",
+            "- Start directly with an action verb (e.g., 'Worked on...', 'Reviewed...', 'Edited...')",
+            "- NEVER start with 'was' or 'Was' - wrong: 'was debugging', right: 'Debugging'",
+            "- NEVER use 'The user', 'The developer', 'They', or third-person pronouns",
+            "- NEVER start with 'Primarily' or filler words",
+            "- Good examples: 'Edited Python code...', 'Reviewed pull requests...', 'Configured Docker...'",
             "",
             "Your response MUST follow this exact format:",
             "",
@@ -319,7 +337,7 @@ class HybridSummarizer:
             "",
             "TAGS: [List of tags for categorization]",
             "",
-            "CONFIDENCE: [0.0 to 1.0]",
+            "CONFIDENCE: [0.0 to 1.0 - use LOW confidence if descriptions were vague]",
         ])
 
         prompt = '\n'.join(prompt_parts)
@@ -488,8 +506,14 @@ class HybridSummarizer:
             prompt_parts.append("")
 
         if focus_context:
-            prompt_parts.append("## Time Breakdown (from focus tracking)")
+            prompt_parts.append("## Time Breakdown (from focus tracking - TRUST THIS DATA)")
             prompt_parts.append(focus_context)
+            prompt_parts.append("")
+            prompt_parts.append("IMPORTANT: The time breakdown above comes from system-level tracking and is ACCURATE.")
+            prompt_parts.append("- Trust the app names, window titles, and process names from focus tracking")
+            prompt_parts.append("- For terminals: the process name (e.g., 'claude', 'vim', 'python') tells you what's running")
+            prompt_parts.append("- 'claude' as a process means Claude Code (an AI coding assistant CLI tool)")
+            prompt_parts.append("- Use screenshots to ADD detail, not to CONTRADICT the focus tracking data")
             prompt_parts.append("")
 
         if ocr_section:
@@ -543,9 +567,14 @@ class HybridSummarizer:
             "- Clear project: \"Implementing focus tracking in activity-tracker daemon.py\"",
             "- General activity: \"Reading documentation and browsing Stack Overflow\"",
             "- Communication: \"Slack conversations and email correspondence\"",
-            "- Unclear: \"Code review and documentation reading\"",
+            "- Unclear: \"Terminal work and web browsing\"",
             "",
-            "CRITICAL: Describe ONLY what is visible. Never invent or assume activities.",
+            "CRITICAL ANTI-HALLUCINATION RULES:",
+            "- Describe ONLY what is clearly visible in screenshots",
+            "- If you cannot read text clearly, say 'terminal work' not 'working on X project'",
+            "- Do NOT invent file names, project names, or specific activities",
+            "- When uncertain, use GENERIC descriptions and LOW confidence",
+            "- Better to be vague and accurate than specific and wrong",
         ])
 
         prompt = "\n".join(prompt_parts)
@@ -777,7 +806,64 @@ class HybridSummarizer:
 
         lines.append(f"\nTotal tracked: {self._format_duration(total_seconds)}, {context_switches} context switches")
 
+        # Add chronological timeline (shows sequence of activities)
+        timeline = self._build_timeline(focus_events)
+        if timeline:
+            lines.append(f"\nTimeline (chronological):\n{timeline}")
+
         return '\n'.join(lines)
+
+    def _build_timeline(self, focus_events: list[dict]) -> str:
+        """Build a chronological timeline of focus events.
+
+        Shows the sequence of activities with timestamps and durations,
+        helping the LLM understand work patterns and flow.
+
+        Args:
+            focus_events: List of focus event dicts from storage.
+
+        Returns:
+            Formatted timeline string, or empty string if no events.
+        """
+        if not focus_events:
+            return ""
+
+        # Sort by start_time
+        sorted_events = sorted(
+            focus_events,
+            key=lambda e: e.get('start_time', '') or ''
+        )
+
+        timeline_lines = []
+
+        for event in sorted_events:
+            start_time = event.get('start_time', '')
+            duration = event.get('duration_seconds', 0) or 0
+            app_name = event.get('app_name', 'Unknown')
+            title = self._truncate_title(event.get('window_title', ''))
+
+            # Enrich with terminal context
+            terminal_context = event.get('terminal_context')
+            if terminal_context:
+                enriched_title = self._parse_terminal_context(terminal_context)
+                if enriched_title:
+                    title = enriched_title
+
+            # Extract just the time portion (HH:MM:SS for precision)
+            if 'T' in start_time:
+                time_str = start_time.split('T')[1][:8]
+            else:
+                time_str = start_time[:8] if start_time else '??:??:??'
+
+            # Format duration
+            dur_str = self._format_duration(duration)
+
+            if title and title != app_name:
+                timeline_lines.append(f"  {time_str}: {app_name} ({title}) [{dur_str}]")
+            else:
+                timeline_lines.append(f"  {time_str}: {app_name} [{dur_str}]")
+
+        return '\n'.join(timeline_lines)
 
     def _parse_terminal_context(self, context_json: str) -> str:
         """Parse terminal context JSON and return enriched title.
@@ -858,6 +944,39 @@ class HybridSummarizer:
             return title[:max_len-3] + '...'
         return title
 
+    def _normalize_window_title(self, title: str) -> str:
+        """Normalize window title for matching between focus events and screenshots.
+
+        Window titles can differ slightly between focus events and screenshots
+        due to timing (e.g., VS Code may show different file names). This
+        normalizes titles for better matching:
+        - Removes common app suffixes
+        - Truncates to 50 chars
+        - Strips leading/trailing whitespace
+
+        Args:
+            title: Raw window title.
+
+        Returns:
+            Normalized title for grouping purposes.
+        """
+        if not title:
+            return ""
+
+        # Remove common app suffixes for better matching
+        for suffix in [' - Google Chrome', ' - Mozilla Firefox', ' - Visual Studio Code',
+                       ' — Mozilla Firefox', ' - Chromium', ' - Code - OSS',
+                       ' - Brave', ' - Edge']:
+            title = title.replace(suffix, '')
+
+        # Also handle titles that start with unsaved indicator
+        if title.startswith('● '):
+            title = title[2:]
+
+        # Truncate and strip
+        title = title.strip()[:50]
+        return title
+
     def _format_duration(self, seconds: float) -> str:
         """Format seconds as human readable duration."""
         if not seconds:
@@ -931,20 +1050,25 @@ class HybridSummarizer:
         min_focus_threshold: float = 0.05
     ) -> list[dict]:
         """
-        Sample screenshots weighted by focus duration per app/window.
+        Sample screenshots weighted by focus duration per app+window.
 
         Uses the largest-remainder (Hamilton) method for fair proportional
-        allocation. Apps with more focus time get proportionally more
-        screenshots. Apps below the minimum focus threshold are excluded
+        allocation. Apps/windows with more focus time get proportionally more
+        screenshots. Activities below the minimum focus threshold are excluded
         to avoid diluting representation of primary activities.
 
+        IMPORTANT: This samples by (app_name, window_title) pairs, not just
+        app_name. This ensures that if you spend 50% of time on "Chrome: Gmail"
+        and 25% on "Chrome: GitHub", the sampled screenshots reflect this
+        distribution rather than randomly sampling from all Chrome screenshots.
+
         Args:
-            screenshots: List of screenshot dicts with app_name field.
-            focus_events: List of focus event dicts with app_name and duration.
+            screenshots: List of screenshot dicts with app_name and window_title.
+            focus_events: List of focus event dicts with app_name, window_title, duration.
             max_n: Maximum number of screenshots to return.
             interval_minutes: Target interval between samples.
-            min_focus_threshold: Minimum focus ratio (0.0-1.0) to include an app.
-                Apps with less than this proportion of focus time are excluded.
+            min_focus_threshold: Minimum focus ratio (0.0-1.0) to include an activity.
+                Activities with less than this proportion of focus time are excluded.
                 Default 0.05 (5%).
 
         Returns:
@@ -960,118 +1084,139 @@ class HybridSummarizer:
         timestamps = [s.get("timestamp", 0) for s in screenshots]
         duration_minutes = (max(timestamps) - min(timestamps)) / 60 if timestamps else 0
         ideal_samples = max(1, int(duration_minutes / interval_minutes))
-        target_count = min(ideal_samples, max_n, len(screenshots))
+        # Ensure at least 3 samples for reasonable coverage
+        target_count = min(max(ideal_samples, 3), max_n, len(screenshots))
 
         if target_count >= len(screenshots):
             return screenshots
 
-        # Calculate total focus time per app
-        app_focus_time = {}
+        # Calculate focus time per (app, window_title) pair
+        # This gives us window-level granularity instead of just app-level
+        activity_focus_time = {}
         for event in focus_events:
             app = event.get('app_name', 'unknown') or 'unknown'
+            # Normalize window title for matching (truncate to first 50 chars)
+            title = self._normalize_window_title(event.get('window_title', ''))
+            key = (app, title)
             duration = event.get('duration_seconds', 0) or 0
-            app_focus_time[app] = app_focus_time.get(app, 0) + duration
+            activity_focus_time[key] = activity_focus_time.get(key, 0) + duration
 
-        total_focus_time = sum(app_focus_time.values())
+        total_focus_time = sum(activity_focus_time.values())
         if total_focus_time == 0:
             return self._sample_screenshots_uniform(screenshots, max_n, interval_minutes)
 
-        # Group screenshots by app
-        app_screenshots = {}
+        # Group screenshots by (app, window_title) pair
+        activity_screenshots = {}
         for ss in screenshots:
             app = ss.get('app_name', 'unknown') or 'unknown'
-            if app not in app_screenshots:
-                app_screenshots[app] = []
-            app_screenshots[app].append(ss)
+            title = self._normalize_window_title(ss.get('window_title', ''))
+            key = (app, title)
+            if key not in activity_screenshots:
+                activity_screenshots[key] = []
+            activity_screenshots[key].append(ss)
 
-        # Filter to apps above threshold that have screenshots
-        filtered_apps = {
-            app: time for app, time in app_focus_time.items()
-            if time / total_focus_time >= min_focus_threshold
-            and app in app_screenshots
-            and len(app_screenshots[app]) > 0
-        }
+        # Filter to activities above threshold that have screenshots
+        filtered_activities = {}
+        for key, time in activity_focus_time.items():
+            if time / total_focus_time >= min_focus_threshold:
+                # Check if we have matching screenshots
+                if key in activity_screenshots and len(activity_screenshots[key]) > 0:
+                    filtered_activities[key] = time
+                else:
+                    # Try to find screenshots with matching app at least
+                    app = key[0]
+                    matching_keys = [k for k in activity_screenshots.keys() if k[0] == app]
+                    if matching_keys:
+                        # Distribute this focus time proportionally to matching screenshot activities
+                        for mkey in matching_keys:
+                            if mkey not in filtered_activities:
+                                filtered_activities[mkey] = 0
+                            filtered_activities[mkey] += time / len(matching_keys)
 
-        if not filtered_apps:
-            # All below threshold - use top app with screenshots only
-            for app in sorted(app_focus_time.keys(), key=lambda a: -app_focus_time[a]):
-                if app in app_screenshots and app_screenshots[app]:
-                    filtered_apps = {app: app_focus_time[app]}
+        if not filtered_activities:
+            # All below threshold - use top activity with screenshots only
+            for key in sorted(activity_focus_time.keys(), key=lambda k: -activity_focus_time[k]):
+                if key in activity_screenshots and activity_screenshots[key]:
+                    filtered_activities = {key: activity_focus_time[key]}
                     break
-            if not filtered_apps:
+            if not filtered_activities:
                 return self._sample_screenshots_uniform(screenshots, max_n, interval_minutes)
 
-        total_filtered = sum(filtered_apps.values())
+        total_filtered = sum(filtered_activities.values())
 
         # Largest-remainder (Hamilton) allocation for fair distribution
         allocations = {}
         remainders = {}
         allocated = 0
 
-        for app, focus_time in filtered_apps.items():
+        for key, focus_time in filtered_activities.items():
             exact = target_count * (focus_time / total_filtered)
             floor_alloc = int(exact)
             # Cap by available screenshots
-            available = len(app_screenshots.get(app, []))
+            available = len(activity_screenshots.get(key, []))
             floor_alloc = min(floor_alloc, available)
-            allocations[app] = floor_alloc
+            allocations[key] = floor_alloc
             # Remainder only counts if we can still add more
             if floor_alloc < available:
-                remainders[app] = exact - floor_alloc
+                remainders[key] = exact - floor_alloc
             else:
-                remainders[app] = 0
+                remainders[key] = 0
             allocated += floor_alloc
 
-        # Distribute remaining slots to apps with largest remainders
+        # Distribute remaining slots to activities with largest remainders
         remaining_slots = target_count - allocated
-        for app in sorted(remainders.keys(), key=lambda a: -remainders[a]):
+        for key in sorted(remainders.keys(), key=lambda k: -remainders[k]):
             if remaining_slots <= 0:
                 break
-            available = len(app_screenshots.get(app, []))
-            if allocations[app] < available:
-                allocations[app] += 1
+            available = len(activity_screenshots.get(key, []))
+            if allocations[key] < available:
+                allocations[key] += 1
                 remaining_slots -= 1
 
-        # Sample screenshots from each app
+        # Sample screenshots from each activity
         sampled = []
-        for app, quota in allocations.items():
+        for key, quota in allocations.items():
             if quota <= 0:
                 continue
-            app_ss = app_screenshots.get(app, [])
-            if not app_ss:
+            activity_ss = activity_screenshots.get(key, [])
+            if not activity_ss:
                 continue
 
-            # Uniformly sample within this app's screenshots (by time)
-            app_ss_sorted = sorted(app_ss, key=lambda s: s.get('timestamp', 0))
-            if len(app_ss_sorted) <= quota:
-                sampled.extend(app_ss_sorted)
+            # Uniformly sample within this activity's screenshots (by time)
+            activity_ss_sorted = sorted(activity_ss, key=lambda s: s.get('timestamp', 0))
+            if len(activity_ss_sorted) <= quota:
+                sampled.extend(activity_ss_sorted)
             else:
-                step = len(app_ss_sorted) / quota
+                step = len(activity_ss_sorted) / quota
                 indices = [int(i * step) for i in range(quota)]
-                sampled.extend([app_ss_sorted[i] for i in indices])
+                sampled.extend([activity_ss_sorted[i] for i in indices])
 
-        # Fill any remaining quota from apps without focus data (screenshots exist but no focus events)
+        # Fill any remaining quota from activities without focus data
         if len(sampled) < target_count:
-            apps_with_focus = set(app_focus_time.keys())
-            for app, app_ss in app_screenshots.items():
-                if app in apps_with_focus:
+            activities_with_focus = set(activity_focus_time.keys())
+            for key, activity_ss in activity_screenshots.items():
+                if key in activities_with_focus:
                     continue
-                for ss in app_ss:
+                for ss in activity_ss:
                     if ss not in sampled and len(sampled) < target_count:
                         sampled.append(ss)
 
         # Sort by timestamp to maintain chronological order
         sampled.sort(key=lambda s: s.get('timestamp', 0))
 
-        # Log allocation details
+        # Log allocation details (use just app names for brevity)
+        app_counts = {}
+        for key, count in allocations.items():
+            if count > 0:
+                app = key[0]
+                app_counts[app] = app_counts.get(app, 0) + count
         alloc_summary = ", ".join(
-            f"{app}:{allocations.get(app, 0)}"
-            for app in sorted(allocations.keys(), key=lambda a: -allocations.get(a, 0))
-            if allocations.get(app, 0) > 0
+            f"{app}:{count}"
+            for app, count in sorted(app_counts.items(), key=lambda x: -x[1])
         )
         logger.info(
             f"Focus-weighted sampling: {len(sampled)}/{target_count} screenshots "
-            f"from {len([a for a in allocations.values() if a > 0])} apps [{alloc_summary}]"
+            f"from {len([v for v in allocations.values() if v > 0])} activities [{alloc_summary}]"
         )
 
         return sampled
@@ -1100,36 +1245,40 @@ class HybridSummarizer:
         lines.append(f"Sampled: {len(sampled)}")
 
         if method == "focus-weighted" and focus_events:
-            # Calculate focus time by app
-            app_focus = {}
+            # Calculate focus time by (app, window) for window-level detail
+            activity_focus = {}
             total_focus = 0
             for event in focus_events:
                 app = event.get('app_name', 'Unknown')
+                title = self._normalize_window_title(event.get('window_title', ''))
+                key = f"{app}: {title[:30]}..." if len(title) > 30 else f"{app}: {title}" if title else app
                 duration = event.get('duration_seconds', 0) or 0
-                app_focus[app] = app_focus.get(app, 0) + duration
+                activity_focus[key] = activity_focus.get(key, 0) + duration
                 total_focus += duration
 
             if total_focus > 0:
-                lines.append("\nFocus distribution:")
-                sorted_apps = sorted(app_focus.items(), key=lambda x: -x[1])
-                for app, duration in sorted_apps[:5]:  # Top 5 apps
+                lines.append("\nFocus distribution (by app+window):")
+                sorted_activities = sorted(activity_focus.items(), key=lambda x: -x[1])
+                for activity, duration in sorted_activities[:6]:  # Top 6 activities
                     pct = (duration / total_focus) * 100
                     mins = int(duration // 60)
                     secs = int(duration % 60)
-                    lines.append(f"  - {app}: {mins}m {secs}s ({pct:.1f}%)")
+                    lines.append(f"  - {activity}: {mins}m {secs}s ({pct:.1f}%)")
 
-                if len(sorted_apps) > 5:
-                    lines.append(f"  ... and {len(sorted_apps) - 5} more apps")
+                if len(sorted_activities) > 6:
+                    lines.append(f"  ... and {len(sorted_activities) - 6} more activities")
 
-            # Count screenshots by app in sampled set
-            sampled_apps = {}
+            # Count screenshots by (app, window) in sampled set
+            sampled_activities = {}
             for s in sampled:
                 app = s.get('app_name', 'Unknown')
-                sampled_apps[app] = sampled_apps.get(app, 0) + 1
+                title = self._normalize_window_title(s.get('window_title', ''))
+                key = f"{app}: {title[:30]}..." if len(title) > 30 else f"{app}: {title}" if title else app
+                sampled_activities[key] = sampled_activities.get(key, 0) + 1
 
-            lines.append("\nScreenshots selected per app:")
-            for app, count in sorted(sampled_apps.items(), key=lambda x: -x[1]):
-                lines.append(f"  - {app}: {count}")
+            lines.append("\nScreenshots selected (by activity):")
+            for activity, count in sorted(sampled_activities.items(), key=lambda x: -x[1]):
+                lines.append(f"  - {activity}: {count}")
 
         return "\n".join(lines)
 
